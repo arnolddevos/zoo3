@@ -1,7 +1,15 @@
-lazy val root = (project in file("."))
+lazy val root = project 
+  .in(file("."))
   .aggregate(insitu, qeduce, summit, minio)
 
-lazy val insitu = (project in file("insitu"))
-lazy val qeduce = (project in file("qeduce")).dependsOn(summit)
-lazy val summit = (project in file("summit"))
-lazy val minio = (project in file("minio"))
+def simpleProject(x: String, v: String) =
+  Project(x, file(x)).settings(
+    name := x,
+    version := v,
+    scalaVersion := "3.0.0-RC3"
+  )
+
+lazy val insitu = simpleProject("insitu", "0.1")
+lazy val qeduce = simpleProject("qeduce", "0.1").dependsOn(summit)
+lazy val summit = simpleProject("summit", "0.1")
+lazy val minio = simpleProject("minio", "0.1")
