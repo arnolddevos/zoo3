@@ -12,4 +12,4 @@ def simpleProject(x: String, v: String) =
 lazy val insitu = simpleProject("insitu", "0.1")
 lazy val qeduce = simpleProject("qeduce", "0.1").dependsOn(summit)
 lazy val summit = simpleProject("summit", "0.1")
-lazy val minio = simpleProject("minio", "0.1")
+lazy val minio = simpleProject("minio", "0.1").dependsOn(insitu)
