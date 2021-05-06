@@ -2,7 +2,7 @@
 
 A collection of small scala3 libraries.
 
-- `insitu` An in-situ testing and instrumentation library.
-- `minio` A minimimal concurrent effects library.
-- `qeduce` A database interface library.
-- `summit` A easier to use mirror for sum and product types.
+- [`insitu`](insitu/README.md) An in-situ testing and instrumentation library.
+- [`minio`](minio/README.md) A minimimal concurrent effects system.
+- [`qeduce`](qeduce/README.md) A database interface library.
+- [`summit`](summit/README.md) A easier to use mirror for sum and product types.
