@@ -154,7 +154,7 @@ given[C](using SumType[C, T]): TC[C] = ...
 
 - The given will be available for any `P` or `C` if the `SumType` or `ProductType` resp. can be constructed.
 
-However, a disadvantage is that the given and its `SumType` or `ProductType` will be constructed each time it is used.  That might be a significant cost.
+However, a disadvantage is that an instance of `TC` and its underlying `SumType` or `ProductType` will be constructed each time it is used.  That might be a significant cost.
 
 ## `derives`
 
@@ -168,7 +168,7 @@ case class Person(name: String, age: Int) derives TC
 ```
 - The `derived` method must be defined in the companion of the typeclass and the `derives` clause added to the definition of each applicable type, such as `Person` above.
 
-- An instance and its `SumType` or `ProductType` will be created at most once for each sum or product type resp.  For example, `TC[Person]` will be constructed at most once.
+- An instance of `TC` will be created at most once for each applicable type.  For example, `TC[Person]` will be constructed at most once.
 
 - Overloading the `derived` method creates a conflict. Only one of the defintions above may be present. Use `SumOrProductType` if the the `TC` applies to both sums and products:
 
