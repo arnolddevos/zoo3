@@ -79,7 +79,7 @@ trait SumType[C, T[_]] extends SumOrProductType[C, T]:
   def label: String
   def branches: IndexedSeq[Branch[C, T]]
   def ordinal(c: C): Int
-  inline def cast(c: C): BranchValue[C, T] =
+  def cast(c: C): BranchValue[C, T] =
     new:
       val branch = branches(ordinal(c))
       val value = c.asInstanceOf[branch.B]
