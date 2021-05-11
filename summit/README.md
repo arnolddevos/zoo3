@@ -214,29 +214,28 @@ showit(49)          // returns "49"
 showit(("age", 49)) // error: no implicit argument of type Show[(String, Int)]  ...
 ```
 
-We can define a `given Show[(String, Int)]` to implement this specic case. Or we can write a definition for any tuple or case class. In other words, any product type.
+We can define a given `Show[(String, Int)]` to implement this last case.
 
-In the following, `showProduct[P]` creates a `Show[P]` using a `summit.ProductType[P, Show]`. 
-A given `ProductType[P, Show]` will be available if `P` is a product type
-and there is a given instance of `Show` for each element (ie member) of `P`.
+Or, more generally, we could define a given `Show[(A, B)]` where A and B are 
+any types with given `Show[A]` and `Show[B]` resp.
 
- The tuple `(String, Int)` qualifies because we have givens `Show[String]` and `Show[Int]`.  
+Or, even more generally, we can define a given `Show[P]` 
+where `P` is any tuple or case class
+that has a given `Show` instance for each element. 
 
 ```scala
 object Show:
   import summit.{ProductType, Element}
 
-  given showProduct[P](using prod: ProductType[P, Show]): Show[P] = // 1
-    new Show[P]:
-      def show(p: P) = formatProduct(p, prod.label, prod.elements)  // 2
+  given[P](using ptype: ProductType[P, Show]): Show[P] with        // 1
+    def show(p: P) = formatProduct(p, ptype.label, ptype.elements) // 2
 
   def formatProduct[P](p: P, l: String, es: IndexedSeq[Element[P, Show]]): String =
-    val m = for e <- es yield e.typeclass.show(e.pick(p))           // 3
-    val n = m.mkString(", ")
+    val ns = for e <- es yield e.typeclass.show(e.pick(p))        // 3
+    val n = ns.mkString(", ")
     s"$l($n)"
 
   ...
-
 ```
 
 The formula used here is:
@@ -246,10 +245,12 @@ The formula used here is:
 
   2. Create an instance of `Show[P]`.  Here, `label` is the 
      name of the actual type represented by `P`.  
+
      And `elements` is a sequence of element descriptions, 
      one for each element of `P`.
 
   3. To show `p`, first show each element using an `Element[P, Show]`. 
+
      The `typeclass` is an instance of `Show` for the element 
      and `pick` extracts the element's value from `p`. 
 
