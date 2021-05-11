@@ -141,7 +141,7 @@ trait BranchValue[C, T[_]]:
 
 ## `given`
 
-A `given` definition is the obvious way to create instances for a typeclass.  
+A `given` definition is the obvious way to create instances for a typeclass, `TC`.  
 
 ```scala
 given[P](using ProductType[P, T]): TC[P] = ...
@@ -150,7 +150,7 @@ given[C](using SumType[C, T]): TC[C] = ...
 
 - Definitions can be provided for both sum and product types and these do not clash.
 
-- The definition can be placed anywhere in the _implicit scope_ (although it would usually be in the companion of the typeclass).  
+- The definition can be placed anywhere in the _implicit scope_ (although it would usually be in the companion of `TC`).  
 
 - The given will be available for any `P` or `C` if the `SumType` or `ProductType` resp. can be constructed.
 
@@ -158,7 +158,7 @@ However, a disadvantage is that the given and its `SumType` or `ProductType` wil
 
 ## `derives`
 
-A `derived` definition is the alternative.  
+A `derived` definition for `TC` is the alternative.  
 
 ```scala
 def derived[C](using SumType[C, T]): TC[C] = ...
@@ -170,7 +170,7 @@ case class Person(name: String, age: Int) derives TC
 
 - An instance and its `SumType` or `ProductType` will be created at most once for each sum or product type resp.  For example, `TC[Person]` will be constructed at most once.
 
-- Overloading the `derived` method creates a conflict. Only one of the defintions above can be made for `TC` instances. Use `SumOrProductType` if the the typeclass applies to both sums and products:
+- Overloading the `derived` method creates a conflict. Only one of the defintions above may be present. Use `SumOrProductType` if the the `TC` applies to both sums and products:
 
 ```scala
 def derived[R](using sp: SumOrProductType[R, T]): TC[R] =
@@ -178,6 +178,25 @@ def derived[R](using sp: SumOrProductType[R, T]): TC[R] =
     case given ProductType[R, T] => ...
     case given SumType[R, T] => ...
 ```
+
+## Both
+
+It is possible to provide both a `given` and a `derived` definition for the same typeclass, `TC`.  
+
+```scala
+given tcP[P](using ProductType[P, T]): TC[P] = ...
+given tcC[C](using SumType[C, T]): TC[C] = ...
+def derived[R](using sp: SumOrProductType[R, T]): TC[R] =
+  sp match
+    case given ProductType[R, T] => tcP[R]
+    case given SumType[R, T]     => tcC[R]
+
+```
+
+In this situation, the `derived` definition is used for the applicable type, 
+such as `Person`, iff it has a `derives TC` clause. 
+Otherwise, the `given` definition is used and a new instance of `TC`
+is constructed for each use.
 
 # A Worked Example
 
