@@ -3,7 +3,7 @@ lazy val root = project
   .aggregate(insitu, qeduce, summit, minio)
   .settings( scalaVersion := SV )
 
-def SV = "3.0.0-RC3"
+def SV = "3.0.0"
 
 def simpleProject(x: String, v: String) =
   Project(x, file(x)).settings(
