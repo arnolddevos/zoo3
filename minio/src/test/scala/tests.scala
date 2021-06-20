@@ -6,12 +6,12 @@ import scala.concurrent.duration._
 import scala.collection.mutable.Buffer
 
 object Main extends App {
-  val test = Runner()
+  given reporter: Reporter = Reporter()
   val rt = defaultRuntime
   val pl = rt.platform
 
-  extension [A, B](test: Runner) def io(name: String)(value: A, expect: A => B)(article: A => IO[Nothing, B]) =
-    test(name, trial=s"value=$value"){
+  def testIO[A, B](name: String)(value: A, expect: A => B)(article: A => IO[Nothing, B])(using Reporter) =
+    test(name, detail=s"value=$value"){
       defaultRuntime.unsafeRunSync(article(value)).option
     }.assert {
       case Some(b) if expect(value) == b => true
@@ -24,9 +24,9 @@ object Main extends App {
     pl.fatal(new OutOfMemoryError())
   }.assert(x => x)
 
-  test.suite("IO tests", repeat=10) { test =>
+  suite("IO tests", repeat=10) {
 
-    test.io("evaluate a pure success")(42, identity) {
+    testIO("evaluate a pure success")(42, identity) {
       succeed(_)
     }
 
@@ -44,7 +44,7 @@ object Main extends App {
       _ == 42
     }
 
-    test.async[Option[Int]]("unsafeRunAsync produces a value") {
+    async[Option[Int]]("unsafeRunAsync produces a value") {
       promise =>
         rt.unsafeRunAsync(succeed(42))(ex => promise.success(ex.option))
     }.assert { 
@@ -52,23 +52,23 @@ object Main extends App {
       case _        => false
     }
 
-    test.io("flatMap pure effects")(42, _ - 1) {
+    testIO("flatMap pure effects")(42, _ - 1) {
       x => succeed(x).flatMap(n => succeed(n-1))
     }
 
-    test.io("traverse a list of effects")(Iterable(1, 2, 3), identity) {
+    testIO("traverse a list of effects")(Iterable(1, 2, 3), identity) {
       xs => foreach(xs)(succeed)
     }
 
-    test.io("map effect")(2, _ + 6) {
+    testIO("map effect")(2, _ + 6) {
       n => succeed(n).map(_ + 6)
     }
 
-    test.io("zip effects")(("the", 2), identity) {
+    testIO("zip effects")(("the", 2), identity) {
       (s, n) => succeed(s).zip(succeed(n))
     }
 
-    test.io("exercise a queue")("payload", identity) {
+    testIO("exercise a queue")("payload", identity) {
       x =>
         for {
           q <- effectTotal(queue[String](10))
@@ -78,7 +78,7 @@ object Main extends App {
         yield y
     }
 
-    test.io("exercise a queue little harder")("payload", identity) {
+    testIO("exercise a queue little harder")("payload", identity) {
       x =>
         for {
           q <- effectTotal(queue[String](10))
@@ -92,7 +92,7 @@ object Main extends App {
         yield y
     }
 
-    test.io("exercise just enqueue ops")(Iterable(1, 2, 3), xs => xs.map(_ => ())) {
+    testIO("exercise just enqueue ops")(Iterable(1, 2, 3), xs => xs.map(_ => ())) {
       xs =>
         for {
           q <- effectTotal(queue[Int](10))
@@ -101,7 +101,7 @@ object Main extends App {
         yield ys
     }
 
-    test.io("exercise a queue harder")(Iterable(1, 2, 3, 5, 6), identity) {
+    testIO("exercise a queue harder")(Iterable(1, 2, 3, 5, 6), identity) {
       xs =>
         for {
           q <- effectTotal(queue[Int](10))
@@ -111,7 +111,7 @@ object Main extends App {
         yield ys
     }
 
-    test.io("producer and consumer")(1 to 1000, identity) {
+    testIO("producer and consumer")(1 to 1000, identity) {
       xs =>
         for {
           q  <- effectTotal(queue[Int](10))
@@ -122,5 +122,5 @@ object Main extends App {
         yield ys
     }
   }
-  println(test.report().formatted)
+  println(reporter.report().formatted)
 }
