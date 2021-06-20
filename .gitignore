@@ -10,3 +10,4 @@
 .dotty-ide.json
 .metals/
 /project/metals.sbt
+.DS_Store
