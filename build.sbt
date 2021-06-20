@@ -1,18 +1,26 @@
-lazy val root = project 
-  .in(file("."))
-  .aggregate(insitu, qeduce, summit, minio)
-  .settings( scalaVersion := SV )
 
 def SV = "3.0.0"
+def V  = "0.1"
+def O  = "com.backgroundsignal"
 
-def simpleProject(x: String, v: String) =
+lazy val root = 
+  Project("zoo", file("."))
+  .settings( 
+    organization := O,
+    version := V,
+    scalaVersion := SV 
+  )
+  .aggregate(insitu, qeduce, summit, minio)
+  .dependsOn(insitu, qeduce, summit, minio)
+
+def subProject(x: String, v: String) =
   Project(x, file(x)).settings(
-    name := x,
+    organization := O,
     version := v,
     scalaVersion := SV
   )
 
-lazy val insitu = simpleProject("insitu", "0.1")
-lazy val qeduce = simpleProject("qeduce", "0.1").dependsOn(summit)
-lazy val summit = simpleProject("summit", "0.1")
-lazy val minio = simpleProject("minio", "0.1").dependsOn(insitu)
+lazy val insitu = subProject("insitu", V)
+lazy val qeduce = subProject("qeduce", V).dependsOn(summit)
+lazy val summit = subProject("summit", V)
+lazy val minio  = subProject("minio",  V).dependsOn(insitu)
