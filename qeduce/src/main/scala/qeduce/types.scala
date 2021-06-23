@@ -5,10 +5,16 @@ import java.sql.{ResultSet, PreparedStatement}
 /**
  * Instances of SQLType[A] witness that values of A can be stored in the database.
  */
-abstract class SQLType[A]:
+abstract class SQLType[A]: 
+  parent =>
   def inject: (PreparedStatement, Int, A) => Unit
   def extract: (ResultSet, String) => A
   def display: A => String
+  def bimap[B](f: A => B)(g: B=> A): SQLType[B] =
+    new:
+      val inject = (s, i, b) => parent.inject(s, i, g(b))
+      val extract = (rs, n) => f(parent.extract(rs, n))
+      val display = b => parent.display(g(b))
 
 object SQLType:
   given SQLType[Int] with
