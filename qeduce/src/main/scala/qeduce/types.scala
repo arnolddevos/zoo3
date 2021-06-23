@@ -18,47 +18,47 @@ abstract class SQLType[A]:
 
 object SQLType:
   given SQLType[Int] with
-    def extract = _.getInt(_)
-    def inject = _.setInt(_, _)
-    def display = _.toString
+    val extract = _.getInt(_)
+    val inject = _.setInt(_, _)
+    val display = _.toString
 
   given SQLType[Long] with
-    def extract = _.getLong(_)
-    def inject = _.setLong(_, _)
-    def display = _.toString
+    val extract = _.getLong(_)
+    val inject = _.setLong(_, _)
+    val display = _.toString
 
   given SQLType[Double] with
-    def extract = _.getDouble(_)
-    def inject = _.setDouble(_, _)
-    def display = _.toString
+    val extract = _.getDouble(_)
+    val inject = _.setDouble(_, _)
+    val display = _.toString
 
   given SQLType[Boolean] with
-    def extract = _.getBoolean(_)
-    def inject = _.setBoolean(_, _)
-    def display = _.toString
+    val extract = _.getBoolean(_)
+    val inject = _.setBoolean(_, _)
+    val display = _.toString
 
   given SQLType[String] with
-    def extract = 
+    val extract = 
       (rs, n) =>
         val s = rs.getString(n)
         if s == null then "" else s
 
-    def inject = _.setString(_, _)
-    def display = t => "'" + t.replace("'", "''") + "'"
+    val inject = _.setString(_, _)
+    val display = t => "'" + t.replace("'", "''") + "'"
 
   given [A]( using u: SQLType[A]): SQLType[Option[A]] with
-    def extract =
+    val extract =
       (rs, name) =>
         val a = u.extract(rs, name)
         if(rs.wasNull) None else Some(a)
     
-    def inject =
+    val inject =
       (st, ix, as) =>
         as match
           case Some(a) => u.inject(st, ix, a)
           case None => st.setObject(ix, null)
     
-    def display =
+    val display =
       _ match
         case Some(a) => "Some(" + u.display(a) + ")"
         case None => "None"
