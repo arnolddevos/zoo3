@@ -5,7 +5,7 @@ package qeduce
  */ 
 package models
 
-import summit.{SumType, Branch, BranchValue, Element, trace}
+import summit.{SumType, ProductType, Branch, BranchValue, Element, trace}
 import java.sql.{PreparedStatement, Connection}
 
 def insert[R](r: R)(using t: SQLModel[R])(using Connection): Int = t.insert(r)()
@@ -22,13 +22,6 @@ trait SQLModel[R]:
   def insertAll(rs: Iterable[R]): QueryResult[Int]
 
 object SQLModel:
-
-  class RowRoduct[R](r: Row, b: Branch[R, SQLType]) extends Product:
-    def productElement(ix: Int): Any = 
-      val e = b.elements(ix)
-      r(e.label)(using e.typeclass)
-    def productArity: Int = b.elements.size
-    def canEqual(other: Any) = false
 
   def elementAsParam[B](b: B, e: Element[B, SQLType]): Param =
     Param(e.pick(b))(using e.typeclass)
@@ -69,7 +62,7 @@ object SQLModel:
       def select(label: String): QueryResult[R] = 
         val b = sum.branches.find(_.label == label).get
         val q = sql"select" ~ branchAsLabels(b) ~ sql"from" ~ Query(b.label)
-        q.results.map(r => b.upcast(b.constructor(RowRoduct(r, b))))
+        q.results.map(r => b.upcast(b.constructor(rowProduct(r, b))))
 
       def selectAll(): QueryResult[R] =
         val qrs =
@@ -77,7 +70,7 @@ object SQLModel:
             b <- sum.branches
             q = sql"select" ~ branchAsLabels(b) ~ sql"from" ~ Query(b.label)
           yield
-            q.results.map(r => b.upcast(b.constructor(RowRoduct(r, b))))
+            q.results.map(r => b.upcast(b.constructor(rowProduct(r, b))))
         QueryResult.concat(qrs)
 
       def insertAll(rs: Iterable[R]): QueryResult[Int] = 
@@ -106,3 +99,16 @@ object SQLModel:
                   }
                 f(s0, n)
         QueryResult.concat(qrs)
+
+class RowProduct[P](r: Row, p: ProductType[P, SQLType]) extends Product:
+  def productElement(ix: Int): Any = 
+    val e = p.elements(ix)
+    r(e.label)(using e.typeclass)
+  def productArity: Int = p.elements.size
+  def canEqual(other: Any) = false
+
+def rowProduct[R](r: Row, b: Branch[R, SQLType]) = RowProduct[b.B](r, ProductType(b))
+
+extension(rs: QueryResult[Row])
+  def as[P](using t: ProductType[P, SQLType]): QueryResult[P] = 
+    rs.map(r => t.constructor(RowProduct(r, t)))
