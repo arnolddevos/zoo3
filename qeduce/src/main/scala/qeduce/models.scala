@@ -46,9 +46,8 @@ object SQLModel:
     Query(ls.mkString(", "))
 
   def derived[R](using sum: SumType[R, SQLType]): SQLModel[R] =
+    trace(s"deriving SQLModel[${sum.label}]")
     new:
-      trace(s"deriving SQLModel[${sum.label}]")
-
       def insert(r: R): QueryResult[Int] = 
         val bv = sum.cast(r)
         val qy = 

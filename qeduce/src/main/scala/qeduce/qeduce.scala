@@ -3,6 +3,7 @@ package qeduce
 import java.sql.{ResultSet, PreparedStatement, SQLException, Connection, DriverManager}
 import java.util.Properties
 import scala.util.Try
+import summit.trace
  
 /**
  * A Query can be constructed by the sql string interpolator and 
@@ -39,6 +40,7 @@ trait Query:
    * Pass the executed statement to a fn. It may not be used outside this fn.
    */
   def execute[A](effect: PreparedStatement => A)(using c: Connection): A = 
+    trace(toString)
     val st = c.prepareStatement(parts.mkString("?"))
     try
       for (p, i) <- params.zipWithIndex
