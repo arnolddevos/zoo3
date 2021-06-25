@@ -114,17 +114,21 @@ extension( sc: StringContext)
 
 trait QueryResult[+R]:
   outer =>
-    def fold[S](s0: S)(f: (S, R) => S)(using c: Connection): S
+    def fold[S](s0: S)(f: (S, R) => S)(using Connection): S
     def map[T](g: R => T): QueryResult[T] =
       new:
-        def fold[S](s0: S)(f: (S, T) => S)(using c: Connection): S = outer.fold(s0)((s, r) => f(s, g(r)))
+        def fold[S](s0: S)(f: (S, T) => S)(using Connection): S = outer.fold(s0)((s, r) => f(s, g(r)))
     def ++[T >: R](other: QueryResult[T]): QueryResult[T] =
       new:
-        def fold[S](s0: S)(f: (S, T) => S)(using c: Connection): S =
+        def fold[S](s0: S)(f: (S, T) => S)(using Connection): S =
           val s1 =outer.fold(s0)(f)
           other.fold(s1)(f)
-    def foreach(loop: R => Unit)(using c: Connection): Unit = 
+    def foreach(loop: R => Unit)(using Connection): Unit = 
       fold(())((_, r) => loop(r))
+    def withFilter(pred: R => Boolean): QueryResult[R] =
+      new:
+        def fold[S](s0: S)(f: (S, R) => S)(using Connection): S =
+          outer.fold(s0)((s, r) => if pred(r) then f(s, r) else s)
     def apply()(using c: Connection, e: R <:< Int): Int =
       fold(0)((s, n) => s + e(n))
 
