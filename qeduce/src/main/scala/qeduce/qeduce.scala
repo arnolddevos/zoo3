@@ -4,6 +4,7 @@ import java.sql.{ResultSet, PreparedStatement, SQLException, Connection, DriverM
 import java.util.Properties
 import scala.util.Try
 import summit.trace
+ import scala.util.control.NonFatal
  
 /**
  * A Query can be constructed by the sql string interpolator and 
@@ -147,14 +148,27 @@ object QueryResult:
  */    
 def connect[A](url: String, props: Properties = new Properties)( effect: Connection ?=> A ): A =
   val c = DriverManager.getConnection(url, props)
+  c.setAutoCommit(true)
   try
-    c setAutoCommit false
-    val a = effect(using c)
-    c.commit
-    a
+    effect(using c)
   finally
-    c.rollback
-    c.close
+    c.close()
+
+def transaction[A](effect: Connection ?=> A)(using c: Connection): A =
+  if ! c.getAutoCommit then effect(using c)
+  else
+    c.setAutoCommit(false)
+    try 
+      try 
+        val a = effect(using c)
+        c.commit()
+        a
+      catch
+        case NonFatal(e) =>
+          c.rollback()
+          throw e
+    finally
+      c.setAutoCommit(true)
 
 /**
  * A Param is a parameter to a query comprising a value 
