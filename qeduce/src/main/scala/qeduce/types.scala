@@ -10,7 +10,7 @@ abstract class SQLType[A]:
   def inject: (PreparedStatement, Int, A) => Unit
   def extract: (ResultSet, String) => A
   def display: A => String
-  def bimap[B](f: A => B)(g: B=> A): SQLType[B] =
+  def map[B](f: A => B)(g: B=> A): SQLType[B] =
     new:
       val inject = (s, i, b) => parent.inject(s, i, g(b))
       val extract = (rs, n) => f(parent.extract(rs, n))
