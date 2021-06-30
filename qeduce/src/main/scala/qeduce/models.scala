@@ -23,21 +23,6 @@ trait SQLModel[R]:
 
 object SQLModel:
 
-  def elementAsParam[B](b: B, e: Element[B, SQLType]): Param =
-    Param(e.pick(b))(using e.typeclass)
-
-  def branchAsParams[R](bv: BranchValue[R, SQLType]): Query =
-    val ps =
-      for e <- bv.branch.elements
-      yield elementAsParam(bv.value, e)
-    Query(ps)
-
-  def branchAsLabels[R](b: Branch[R, SQLType]): Query =
-    val ls =
-      for e <- b.elements
-      yield e.label
-    Query(ls.mkString(", "))
-
   def colNames[B](elements: IndexedSeq[Element[B, SQLType]]): Query =
     val ls =
       for e <- elements
@@ -105,61 +90,39 @@ object SQLModel:
     new SQLModel[R]:
       def insert(r: R): QueryResult[Int] = 
         val bv = sum.cast(r)
-        val qy = 
-          sql"insert into" ~ Query(bv.branch.label) ~ 
-          sql"("  ~ branchAsLabels(bv.branch) ~ 
-          sql") values (" ~ branchAsParams(bv) ~ sql")"
-        qy.update
+        insertTemplate(bv.value, bv.branch.label, bv.branch.elements).update
 
       def declare(): QueryResult[Int] = 
         val qrs = 
-          for 
-            b <- sum.branches
-            qy = sql"create table if not exists" ~ Query(b.label) ~ 
-                 sql"(" ~ branchAsLabels(b) ~ sql")"
-          yield qy.update
+          for b <- sum.branches
+          yield createTemplate(b.label, b.elements).update
 
         QueryResult.concat(qrs)
 
       def select(label: String): QueryResult[R] = 
         val b = sum.branches.find(_.label == label).get
-        val q = sql"select" ~ branchAsLabels(b) ~ sql"from" ~ Query(b.label)
+        val q = selectTemplate(label, b.elements)
         q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
 
       def selectAll(): QueryResult[R] =
         val qrs =
           for
             b <- sum.branches
-            q = sql"select" ~ branchAsLabels(b) ~ sql"from" ~ Query(b.label)
+            q = selectTemplate(b.label, b.elements)
           yield
             q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
         QueryResult.concat(qrs)
 
       def insertAll(rs: Iterable[R]): QueryResult[Int] = 
         val grps = rs.map(sum.cast(_)).groupBy(_.branch.ordinal)
+
         val qrs =
-          for
-            (_, bvs) <- grps
-            bv = bvs.head
-            qy =
-              sql"insert into" ~ Query(bv.branch.label) ~ 
-              sql"("  ~ branchAsLabels(bv.branch) ~ 
-              sql") values (" ~ branchAsParams(bv) ~ sql")"
+          for (_, bvs) <- grps
           yield
-            new QueryResult[Int]:
-              def fold[S](s0: S)(f: (S, Int) => S)(using c: Connection): S =
-                val n =
-                  qy.execute {
-                    (st) =>
-                      var n = st.executeUpdate()
-                      for bv <- bvs.tail
-                      do
-                        for e <- bv.branch.elements
-                        do e.typeclass.inject(st, e.index+1, e.pick(bv.value))
-                        n += st.executeUpdate()
-                      n
-                  }
-                f(s0, n)
+            val b = bvs.head.branch
+            val vs = for bv <- bvs yield bv.value.asInstanceOf[b.B]
+            repeatedInsert[b.B](vs, b.label, b.elements)
+
         QueryResult.concat(qrs)
 
 class RowProduct[B](row: Row, elements: IndexedSeq[Element[B, SQLType]]) extends Product:
