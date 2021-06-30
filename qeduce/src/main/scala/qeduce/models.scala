@@ -5,7 +5,7 @@ package qeduce
  */ 
 package models
 
-import summit.{SumType, ProductType, Branch, BranchValue, Element, trace}
+import summit.{SumType, ProductType, SumOrProductType, Branch, BranchValue, Element, trace}
 import java.sql.{PreparedStatement, Connection}
 
 def insert[R](r: R)(using t: SQLModel[R])(using Connection): Int = t.insert(r)()
@@ -38,9 +38,71 @@ object SQLModel:
       yield e.label
     Query(ls.mkString(", "))
 
-  def derived[R](using sum: SumType[R, SQLType]): SQLModel[R] =
-    trace(s"deriving SQLModel[${sum.label}]")
-    new:
+  def colNames[B](elements: IndexedSeq[Element[B, SQLType]]): Query =
+    val ls =
+      for e <- elements
+      yield e.label
+    Query(ls.mkString(", "))
+
+  def colValues[B](b: B, elements: IndexedSeq[Element[B, SQLType]]): Query =
+    val ps =
+      for e <- elements
+      yield Param(e.pick(b))(using e.typeclass)
+    Query(ps)
+
+  def insertTemplate[B](b: B, label: String, elements: IndexedSeq[Element[B, SQLType]]): Query =
+    sql"insert into" ~ Query(label) ~ 
+    sql"("  ~ colNames(elements) ~ 
+    sql") values (" ~ colValues(b, elements) ~ sql")"
+
+  def createTemplate[B](label: String, elements: IndexedSeq[Element[B, SQLType]]): Query =
+    sql"create table if not exists" ~ Query(label) ~ 
+    sql"(" ~ colNames(elements) ~ sql")"
+
+  def selectTemplate[B](label: String, elements: IndexedSeq[Element[B, SQLType]]): Query =
+    sql"select" ~ colNames(elements) ~ sql"from" ~ Query(label)
+
+  def repeatedInsert[B](bs: Iterable[B], label: String, elements: IndexedSeq[Element[B, SQLType]]): QueryResult[Int] =
+    if bs.isEmpty then QueryResult.empty
+    else
+      val qy = insertTemplate(bs.head, label, elements)
+      new QueryResult[Int]:
+        def fold[S](s0: S)(f: (S, Int) => S)(using c: Connection): S =
+          val n =
+            qy.execute {
+              (st) =>
+                var n1 = st.executeUpdate()
+                for b <- bs.tail
+                do
+                  for e <- elements
+                  do e.typeclass.inject(st, e.index+1, e.pick(b))
+                  n1 += st.executeUpdate()
+                n1
+            }
+          f(s0, n)
+
+  def derived[R](using sp: SumOrProductType[R, SQLType]): SQLModel[R] =
+    trace(s"deriving SQLModel[${sp.label}]")
+    sp match
+      case prod: ProductType[R, SQLType] => sqlModelForProduct(prod)
+      case sum: SumType[R, SQLType] => sqlModelForSum(sum)
+
+  def sqlModelForProduct[R](prod: ProductType[R, SQLType]) = 
+    new SQLModel[R]:
+      def insert(r: R): QueryResult[Int] = 
+        insertTemplate(r, prod.label, prod.elements).update
+      def declare(): QueryResult[Int] = 
+        createTemplate(prod.label, prod.elements).update
+      def select(label: String): QueryResult[R] = 
+        for r <- selectTemplate(label, prod.elements).results
+        yield prod.constructor(RowProduct(r, prod.elements))
+      def selectAll(): QueryResult[R] = 
+        select(prod.label)
+      def insertAll(rs: Iterable[R]): QueryResult[Int] = 
+        repeatedInsert(rs, prod.label, prod.elements)
+
+  def sqlModelForSum[R](sum: SumType[R, SQLType]) = 
+    new SQLModel[R]:
       def insert(r: R): QueryResult[Int] = 
         val bv = sum.cast(r)
         val qy = 
@@ -62,7 +124,7 @@ object SQLModel:
       def select(label: String): QueryResult[R] = 
         val b = sum.branches.find(_.label == label).get
         val q = sql"select" ~ branchAsLabels(b) ~ sql"from" ~ Query(b.label)
-        q.results.map(r => b.upcast(b.constructor(rowProduct(r, b))))
+        q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
 
       def selectAll(): QueryResult[R] =
         val qrs =
@@ -70,7 +132,7 @@ object SQLModel:
             b <- sum.branches
             q = sql"select" ~ branchAsLabels(b) ~ sql"from" ~ Query(b.label)
           yield
-            q.results.map(r => b.upcast(b.constructor(rowProduct(r, b))))
+            q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
         QueryResult.concat(qrs)
 
       def insertAll(rs: Iterable[R]): QueryResult[Int] = 
@@ -100,15 +162,13 @@ object SQLModel:
                 f(s0, n)
         QueryResult.concat(qrs)
 
-class RowProduct[P](r: Row, p: ProductType[P, SQLType]) extends Product:
+class RowProduct[B](row: Row, elements: IndexedSeq[Element[B, SQLType]]) extends Product:
   def productElement(ix: Int): Any = 
-    val e = p.elements(ix)
-    r(e.label)(using e.typeclass)
-  def productArity: Int = p.elements.size
+    val e = elements(ix)
+    row(e.label)(using e.typeclass)
+  def productArity: Int = elements.size
   def canEqual(other: Any) = false
-
-def rowProduct[R](r: Row, b: Branch[R, SQLType]) = RowProduct[b.B](r, ProductType(b))
 
 extension(rs: QueryResult[Row])
   def as[P](using t: ProductType[P, SQLType]): QueryResult[P] = 
-    rs.map(r => t.constructor(RowProduct(r, t)))
+    rs.map(r => t.constructor(RowProduct(r, t.elements)))
