@@ -8,24 +8,79 @@ package models
 import summit.{SumType, ProductType, SumOrProductType, Branch, BranchValue, Element, trace}
 import java.sql.{PreparedStatement, Connection}
 
-def insert[R](r: R)(using t: SQLModel[R])(using Connection): Int = t.insert(r)()
-def declare[R](using t: SQLModel[R])(using Connection): Int = t.declare()()
-def select[R](label: String)(using t: SQLModel[R]): QueryResult[R] = t.select(label)
-def selectAll[R](using t: SQLModel[R]): QueryResult[R] = t.selectAll()
-def insertAll[R](rs: Iterable[R])(using t: SQLModel[R])(using Connection): Int = t.insertAll(rs)()
-def parse[R](label: String, fields: IndexedSeq[String])(using t: SQLModel[R]) = t.parse(label, fields)
-def parseTSV[R](label: String, line: String)(using SQLModel[R]) = parse(label, line.split('\t').toIndexedSeq)
+def insert[R](r: R)(using t: SQLTable[R])(using Connection): Int = t.insert(r)()
+def declare[R](using t: SQLTable[R])(using Connection): Int = t.declare()()
+def selectBranch[R](label: String)(using t: SQLModel[R]): QueryResult[R] = t.selectBranch(label)
+def select[R](using t: SQLTable[R]): QueryResult[R] = t.select()
+def insertAll[R](rs: Iterable[R])(using t: SQLTable[R])(using Connection): Int = t.insertAll(rs)()
 
-trait SQLModel[R]:
+trait SQLTable[R]:
   def insert(r: R): QueryResult[Int]
-  def declare(): QueryResult[Int]
-  def select(label: String): QueryResult[R]
-  def selectAll(): QueryResult[R]
   def insertAll(rs: Iterable[R]): QueryResult[Int]
-  def parse(label: String, fields: IndexedSeq[String]): Option[R]
+  def declare(): QueryResult[Int]
+  def select(): QueryResult[R]
+
+import Helpers._
+
+object SQLTable:
+  def derived[R](using prod: ProductType[R, SQLType]): SQLTable[R] =
+    trace(s"deriving SQLTable[${prod.label}]")
+    new SQLTable[R]:
+      def insert(r: R): QueryResult[Int] = 
+        insertTemplate(r, prod.label, prod.elements).update
+      def declare(): QueryResult[Int] = 
+        createTemplate(prod.label, prod.elements).update
+      def select(): QueryResult[R] = 
+        for r <- selectTemplate(prod.label, prod.elements).results
+        yield prod.constructor(RowProduct(r, prod.elements))
+      def insertAll(rs: Iterable[R]): QueryResult[Int] = 
+        repeatedInsert(rs, prod.label, prod.elements)
+
+trait SQLModel[R] extends SQLTable[R]:
+  def selectBranch(label: String): QueryResult[R]
 
 object SQLModel:
+  def derived[R](using sum: SumType[R, SQLType]): SQLModel[R] =
+    trace(s"deriving SQLModel[${sum.label}]")
+    new SQLModel[R]:
+      def insert(r: R): QueryResult[Int] = 
+        val bv = sum.cast(r)
+        insertTemplate(bv.value, bv.branch.label, bv.branch.elements).update
 
+      def declare(): QueryResult[Int] = 
+        val qrs = 
+          for b <- sum.branches
+          yield createTemplate(b.label, b.elements).update
+
+        QueryResult.concat(qrs)
+
+      def selectBranch(label: String): QueryResult[R] = 
+        val b = sum.branches.find(_.label == label).get
+        val q = selectTemplate(label, b.elements)
+        q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
+
+      def select(): QueryResult[R] =
+        val qrs =
+          for
+            b <- sum.branches
+            q = selectTemplate(b.label, b.elements)
+          yield
+            q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
+        QueryResult.concat(qrs)
+
+      def insertAll(rs: Iterable[R]): QueryResult[Int] = 
+        val grps = rs.map(sum.cast(_)).groupBy(_.branch.ordinal)
+
+        val qrs =
+          for (_, bvs) <- grps
+          yield
+            val b = bvs.head.branch
+            val vs = for bv <- bvs yield bv.value.asInstanceOf[b.B]
+            repeatedInsert[b.B](vs, b.label, b.elements)
+
+        QueryResult.concat(qrs)
+
+object Helpers:
   def colNames[B](elements: IndexedSeq[Element[B, SQLType]]): Query =
     val ls =
       for e <- elements
@@ -50,16 +105,6 @@ object SQLModel:
   def selectTemplate[B](label: String, elements: IndexedSeq[Element[B, SQLType]]): Query =
     sql"select" ~ colNames(elements) ~ sql"from" ~ Query(label)
 
-  def parseFields[B](fields: IndexedSeq[String], elements: IndexedSeq[Element[B, SQLType]], ctor: Product => B): Option[B] =
-    val vs: IndexedSeq[Any] =
-      for 
-        (e, f) <- elements.zip(fields)
-        v <- e.typeclass.parse(f)
-      yield  v
-    if vs.size != elements.size then None
-    else Some(ctor(SeqProduct(vs)))
-
-
   def repeatedInsert[B](bs: Iterable[B], label: String, elements: IndexedSeq[Element[B, SQLType]]): QueryResult[Int] =
     if bs.isEmpty then QueryResult.empty
     else
@@ -79,81 +124,11 @@ object SQLModel:
             }
           f(s0, n)
 
-  def derived[R](using sp: SumOrProductType[R, SQLType]): SQLModel[R] =
-    trace(s"deriving SQLModel[${sp.label}]")
-    sp match
-      case prod: ProductType[R, SQLType] => sqlModelForProduct(prod)
-      case sum: SumType[R, SQLType] => sqlModelForSum(sum)
-
-  def sqlModelForProduct[R](prod: ProductType[R, SQLType]) = 
-    new SQLModel[R]:
-      def insert(r: R): QueryResult[Int] = 
-        insertTemplate(r, prod.label, prod.elements).update
-      def declare(): QueryResult[Int] = 
-        createTemplate(prod.label, prod.elements).update
-      def select(label: String): QueryResult[R] = 
-        for r <- selectTemplate(label, prod.elements).results
-        yield prod.constructor(RowProduct(r, prod.elements))
-      def selectAll(): QueryResult[R] = 
-        select(prod.label)
-      def insertAll(rs: Iterable[R]): QueryResult[Int] = 
-        repeatedInsert(rs, prod.label, prod.elements)
-      def parse(label: String, fields: IndexedSeq[String]): Option[R] =
-        parseFields(fields, prod.elements, prod.constructor)
-          
-
-  def sqlModelForSum[R](sum: SumType[R, SQLType]) = 
-    new SQLModel[R]:
-      def insert(r: R): QueryResult[Int] = 
-        val bv = sum.cast(r)
-        insertTemplate(bv.value, bv.branch.label, bv.branch.elements).update
-
-      def declare(): QueryResult[Int] = 
-        val qrs = 
-          for b <- sum.branches
-          yield createTemplate(b.label, b.elements).update
-
-        QueryResult.concat(qrs)
-
-      def select(label: String): QueryResult[R] = 
-        val b = sum.branches.find(_.label == label).get
-        val q = selectTemplate(label, b.elements)
-        q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
-
-      def selectAll(): QueryResult[R] =
-        val qrs =
-          for
-            b <- sum.branches
-            q = selectTemplate(b.label, b.elements)
-          yield
-            q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
-        QueryResult.concat(qrs)
-
-      def insertAll(rs: Iterable[R]): QueryResult[Int] = 
-        val grps = rs.map(sum.cast(_)).groupBy(_.branch.ordinal)
-
-        val qrs =
-          for (_, bvs) <- grps
-          yield
-            val b = bvs.head.branch
-            val vs = for bv <- bvs yield bv.value.asInstanceOf[b.B]
-            repeatedInsert[b.B](vs, b.label, b.elements)
-
-        QueryResult.concat(qrs)
-      def parse(label: String, fields: IndexedSeq[String]): Option[R] =
-        val b = sum.branches.find(_.label == label).get
-        parseFields(fields, b.elements, b.constructor).map(b.upcast)
-
 class RowProduct[B](row: Row, elements: IndexedSeq[Element[B, SQLType]]) extends Product:
   def productElement(ix: Int): Any = 
     val e = elements(ix)
     row(e.label)(using e.typeclass)
   def productArity: Int = elements.size
-  def canEqual(other: Any) = false
-
-class SeqProduct(seq: IndexedSeq[Any]) extends Product:
-  def productElement(ix: Int): Any = seq(ix)
-  def productArity: Int = seq.size
   def canEqual(other: Any) = false
 
 extension(rs: QueryResult[Row])
