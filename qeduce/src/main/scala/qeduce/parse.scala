@@ -3,6 +3,11 @@ package parsable
 
 import summit.{ProductType, Element, trace}
 
+import java.time.LocalDate 
+import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalQueries.localDate
+import scala.util.{Try, Success, Failure}
+
 trait ParsableField[A]:
   def parse: String => Option[A]
 
@@ -24,6 +29,28 @@ object ParsableField:
 
   given[A](using e: ParsableField[A]): ParsableField[Option[A]] with
     val parse = f => if f.isBlank then Some(None) else e.parse(f).map(Some(_))
+
+  given ParsableField[LocalDate] with
+    val parse = 
+      field =>
+        def loop(forms: List[DateTimeFormatter]): Option[LocalDate] =
+          forms match
+            case Nil => None
+            case form :: alternates =>
+              Try(form.parse(field, localDate)) match
+                case Success(date) => Some(date)
+                case Failure(_) => loop(alternates)
+        end loop
+        loop(allForms)
+
+  val allForms = 
+    List(
+      DateTimeFormatter.ISO_LOCAL_DATE,
+      DateTimeFormatter.ofPattern("d/M/yyyy"),
+      DateTimeFormatter.ofPattern("d/M/yy"),
+      DateTimeFormatter.ofPattern("d'.'M'.'yy"),
+      DateTimeFormatter.ofPattern("d'.'M'.'yyyy")
+    )
 
 def parse[R](fields: IndexedSeq[String])(using t: Parsable[R]) = t.parse(fields)
 def parseTSV[R](line: String)(using Parsable[R]) = parse(line.split('\t').toIndexedSeq)

@@ -1,6 +1,10 @@
 package qeduce
 
 import java.sql.{ResultSet, PreparedStatement}
+import java.time.LocalDate 
+import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalQueries.localDate
+import scala.util.{Try, Success, Failure}
 
 /**
  * Instances of SQLType[A] witness that values of A can be stored in the database.
@@ -62,3 +66,12 @@ object SQLType:
       _ match
         case Some(a) => "Some(" + u.display(a) + ")"
         case None => "None"
+
+  given SQLType[LocalDate] with
+    val extract = (rs, name) => parseISODate(rs.getString(name))
+    val inject  = (st, ix, value) => st.setString(ix, value.toString)
+    val display = _.toString
+
+  def parseISODate(text: String): LocalDate =
+    DateTimeFormatter.ISO_LOCAL_DATE.parse(text, localDate)
+    
