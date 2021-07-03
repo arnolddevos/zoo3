@@ -22,6 +22,9 @@ object ParsableField:
   given ParsableField[String] with
     val parse = Option(_)
 
+  given[A](using e: ParsableField[A]): ParsableField[Option[A]] with
+    val parse = f => if f.isBlank then Some(None) else e.parse(f).map(Some(_))
+
 def parse[R](fields: IndexedSeq[String])(using t: Parsable[R]) = t.parse(fields)
 def parseTSV[R](line: String)(using Parsable[R]) = parse(line.split('\t').toIndexedSeq)
 
