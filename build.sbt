@@ -1,6 +1,6 @@
 
 def SV = "3.0.0"
-def V  = "0.5.3"
+def V  = "0.6.0"
 def O  = "com.backgroundsignal"
 
 lazy val root = 
@@ -21,6 +21,8 @@ def subProject(x: String, v: String) =
   )
 
 lazy val insitu = subProject("insitu", V)
-lazy val qeduce = subProject("qeduce", V).dependsOn(summit)
+lazy val qeduce = subProject("qeduce", V)
+  .dependsOn(summit)
+  .settings(libraryDependencies += "com.lihaoyi" %% "geny" % "0.6.10")
 lazy val summit = subProject("summit", V)
 lazy val minio  = subProject("minio",  V).dependsOn(insitu)

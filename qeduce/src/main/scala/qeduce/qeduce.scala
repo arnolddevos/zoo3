@@ -4,7 +4,8 @@ import java.sql.{ResultSet, PreparedStatement, SQLException, Connection, DriverM
 import java.util.Properties
 import scala.util.Try
 import summit.trace
- import scala.util.control.NonFatal
+import scala.util.control.NonFatal
+import geny.Generator
  
 /**
  * A Query can be constructed by the sql string interpolator and 
@@ -14,6 +15,8 @@ import summit.trace
  * interleaved, typed parameter values.
  */
 trait Query:
+  query =>
+
   def parts: Seq[String]
   def params: Seq[Param]
 
@@ -22,7 +25,7 @@ trait Query:
     val b = parts.last + " " + other.parts.head
     val c = other.parts drop 1
     val d = params ++ other.params
-    new:
+    new Query:
       val parts = (a :+ b) ++ c
       val params = d
 
@@ -40,47 +43,42 @@ trait Query:
    * 
    * Pass the executed statement to a fn. It may not be used outside this fn.
    */
-  def execute[A](effect: PreparedStatement => A)(using c: Connection): A = 
-    trace(toString)
-    val st = c.prepareStatement(parts.mkString("?"))
-    try
-      for (p, i) <- params.zipWithIndex
-      do p.sqlType.inject(st, i+1, p.value)
-      effect(st)
-    finally
-      st.close
+  def apply(): Connection ?=> Generator[PreparedStatement] =
+    new Generator[PreparedStatement]:
+      def generate(effect: PreparedStatement => Generator.Action): Generator.Action =
+        trace(query.toString)
+        val st = summon[Connection].prepareStatement(parts.mkString("?"))
+        try
+          for (p, i) <- params.zipWithIndex
+          do p.sqlType.inject(st, i+1, p.value)
+          effect(st)
+        finally
+          st.close
 
   /**
    * Execute the Query as an update or data definition and return the update count.
    */
-  def update: QueryResult[Int] = 
-    new:
-      def fold[S](s0: S)(f: (S, Int) => S)(using c: Connection): S =
-        f(s0, execute(_.executeUpdate()))
+  def update: Connection ?=> Int = 
+    var ig = 0
+    for st <- apply()
+    do ig += st.executeUpdate()
+    ig
 
-  def results: QueryResult[Row] = 
-    new:
-      def fold[S](s0: S)(f: (S, Row) => S)(using c: Connection): S =
-        execute {
-          (st) =>
-            val rs = st.executeQuery()
-            var s = s0 
-            for cursor <- Option(rs) 
-            do
-              try
-                while cursor.next() 
-                do s = f(s, Row(cursor))
-              finally
-                cursor.close
-            s
-        }
+  /**
+   * Execute the Query as query and return a Generator of Rows
+   */   
+  def results: Connection ?=> Generator[Row] = 
+    for 
+      st <- apply()
+      row <- Query.resultGenerator(st)
+    yield row
 
 object Query:
   /**
    * Construct a static Query fragment explicitly.
    */
   def apply(text: String): Query =
-    new:
+    new Query:
       val parts = Seq(text)
       val params = Seq()
 
@@ -88,7 +86,7 @@ object Query:
    * Construct a Query fragment consisting of a parameter.
    */
   def apply(param: Param): Query =
-    new:
+    new Query:
       val parts = Seq("", "")
       val params = Seq(param)
 
@@ -96,51 +94,34 @@ object Query:
    * Construct comma separated parameters.
    */
   def apply(ps: Seq[Param]): Query =
-    new:
+    new Query:
       val parts = 
         ps.size match
           case 0 => Seq("")
           case 1 => Seq("", "")
           case n => Seq("") ++ Seq.fill(n-1)(", ") ++ Seq("")
       val params = ps
+
+  def resultGenerator(st: PreparedStatement) =
+    new Generator[Row]:
+      def generate(f: Row => Generator.Action): Generator.Action =
+        var a: Generator.Action = Generator.Continue
+        val cursor = st.executeQuery()
+        try
+          while a == Generator.Continue && cursor.next() 
+          do a = f(Row(cursor))
+          a
+        finally
+          cursor.close
    
 /**
  * The `sql` string interpolator.
  */
 extension( sc: StringContext)
   def sql( ps: Param* ): Query = 
-    new:
+    new Query:
       val parts = sc.parts
       val params = ps
-
-trait QueryResult[+R]:
-  outer =>
-    def fold[S](s0: S)(f: (S, R) => S)(using Connection): S
-    def map[T](g: R => T): QueryResult[T] =
-      new:
-        def fold[S](s0: S)(f: (S, T) => S)(using Connection): S = outer.fold(s0)((s, r) => f(s, g(r)))
-    def ++[T >: R](other: QueryResult[T]): QueryResult[T] =
-      new:
-        def fold[S](s0: S)(f: (S, T) => S)(using Connection): S =
-          val s1 =outer.fold(s0)(f)
-          other.fold(s1)(f)
-    def foreach(loop: R => Unit)(using Connection): Unit = 
-      fold(())((_, r) => loop(r))
-    def withFilter(pred: R => Boolean): QueryResult[R] =
-      new:
-        def fold[S](s0: S)(f: (S, R) => S)(using Connection): S =
-          outer.fold(s0)((s, r) => if pred(r) then f(s, r) else s)
-    def apply()(using c: Connection, e: R <:< Int): Int =
-      fold(0)((s, n) => s + e(n))
-
-object QueryResult:
-  val empty: QueryResult[Nothing] =
-    new:
-      def fold[S](s0: S)(f: (S, Nothing) => S)(using Connection): S = s0
-      
-  def concat[R](qrs: Iterable[QueryResult[R]]): QueryResult[R] =
-    if qrs.nonEmpty then qrs.reduce(_ ++ _)
-    else empty
 
 /**
  * Connect to a database and provide the connection as a given to a context fn.
