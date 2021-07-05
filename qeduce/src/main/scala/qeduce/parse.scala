@@ -53,7 +53,11 @@ object ParsableField:
     )
 
 def parse[R](fields: IndexedSeq[String])(using t: Parsable[R]) = t.parse(fields)
-def parseTSV[R](line: String)(using Parsable[R]) = parse(line.split('\t').toIndexedSeq)
+
+def parseTSV[R](line: String)(using t: Parsable[R]): Either[String, R] = 
+  t.parse(line.split('\t').toIndexedSeq) match
+    case Some(r) => Right(r)
+    case None    => Left(line)
 
 trait Parsable[R]:
   def parse(fields: IndexedSeq[String]): Option[R]
