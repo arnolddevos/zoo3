@@ -3,8 +3,9 @@ package qeduce
 import java.sql.{ResultSet, PreparedStatement, SQLException, Connection, DriverManager}
 import java.util.Properties
 import scala.util.Try
-import summit.trace
 import scala.util.control.NonFatal
+import scala.collection.immutable.ArraySeq
+import summit.trace
 import geny.Generator
  
 /**
@@ -14,7 +15,7 @@ import geny.Generator
  * Internally, it consists of N sql text parts and N-1 
  * interleaved, typed parameter values.
  */
-trait Query:
+trait Query extends SQLRepr:
   query =>
 
   def parts: Seq[String]
@@ -34,6 +35,8 @@ trait Query:
 
   def ~[A](term: SQLTerm[A]): Query =
     this ~ Query(term.name)
+
+  def +(other: Query) = CompoundQuery(ArraySeq(this, other))
     
   override def toString = parts.zip(params).map(_ + _).mkString + parts.last
 
@@ -54,24 +57,6 @@ trait Query:
           effect(st)
         finally
           st.close
-
-  /**
-   * Execute the Query as an update or data definition and return the update count.
-   */
-  def update: Connection ?=> Int = 
-    var ig = 0
-    for st <- apply()
-    do ig += st.executeUpdate()
-    ig
-
-  /**
-   * Execute the Query as query and return a Generator of Rows
-   */   
-  def results: Connection ?=> Generator[Row] = 
-    for 
-      st <- apply()
-      row <- Query.resultGenerator(st)
-    yield row
 
 object Query:
   /**
@@ -124,6 +109,50 @@ extension( sc: StringContext)
     new Query:
       val parts = sc.parts
       val params = ps
+
+/**
+ * A concatenation of Query's.
+ */       
+class CompoundQuery(val queries: ArraySeq[Query]) extends SQLRepr:
+
+  def +(query: Query) = CompoundQuery(queries :+ query)
+  def +(other: CompoundQuery) = CompoundQuery(queries ++ other.queries)
+  
+  def apply(): Connection ?=> Generator[PreparedStatement] =
+    for 
+      q <- Generator.from(queries)
+      s <- q()
+    yield s
+
+  override def toString = queries.mkString(";\n")
+
+/**
+ * A Query or CompoundQuery represents some SQL.
+ */ 
+trait SQLRepr:
+
+  /**
+   * Generate JDBC statements, pending a connection.
+   */ 
+  def apply(): Connection ?=> Generator[PreparedStatement]
+
+  /**
+   * Execute a the statements as an update or data definition and return the update count.
+   */
+  def update: Connection ?=> Int = 
+    var ig = 0
+    for st <- apply()
+    do ig += st.executeUpdate()
+    ig
+
+  /**
+   * Execute the statments as queries and return a Generator of Rows
+   */   
+  def results: Connection ?=> Generator[Row] = 
+    for 
+      st <- apply()
+      row <- Query.resultGenerator(st)
+    yield row
 
 /**
  * Connect to a database and provide the connection as a given to a context fn.
