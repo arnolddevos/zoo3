@@ -8,6 +8,7 @@ package models
 import summit.{SumType, ProductType, SumOrProductType, Branch, BranchValue, Element, trace}
 import java.sql.{PreparedStatement, Connection}
 import geny.Generator
+import helpers._
 
 def insert[R](r: R)(using t: SQLTable[R]): Connection ?=> Int = t.insert(r)
 def declare[R](using t: SQLTable[R]): Connection ?=> Int = t.declare()
@@ -77,7 +78,7 @@ object SQLModel:
           n += repeatedInsert[b.B](vs, b.label, b.elements)
         n
 
-object Helpers:
+package helpers:
   def colNames[B](elements: IndexedSeq[Element[B, SQLType]]): Query =
     val ls =
       for e <- elements
@@ -116,12 +117,14 @@ object Helpers:
           n += st.executeUpdate()
     n
 
-class RowProduct[B](row: Row, elements: IndexedSeq[Element[B, SQLType]]) extends Product:
+  class RowProduct[B](row: Row, elements: IndexedSeq[Element[B, SQLType]]) extends Product:
+    def productElement(ix: Int): Any = 
   def productElement(ix: Int): Any = 
-    val e = elements(ix)
-    row(e.label)(using e.typeclass)
-  def productArity: Int = elements.size
-  def canEqual(other: Any) = false
+    def productElement(ix: Int): Any = 
+      val e = elements(ix)
+      row(e.label)(using e.typeclass)
+    def productArity: Int = elements.size
+    def canEqual(other: Any) = false
 
 extension(rs: Connection ?=> Generator[Row])
   def as[P](using t: ProductType[P, SQLType]): Connection ?=> Generator[P] = 
