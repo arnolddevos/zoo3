@@ -24,7 +24,9 @@ trait SQLCore[R]:
   def insertAll(rs: Iterable[R]): Connection ?=> Int
   def select(clause: Query): Connection ?=> Generator[R]
 
-trait SQLTable[R] extends SQLCore[R]
+trait SQLTable[R] extends SQLCore[R]:
+  def columns: Query
+  def values(r: R): Query
 
 object SQLTable:
   def derived[R](using prod: ProductType[R, SQLType]): SQLTable[R] =
@@ -39,6 +41,8 @@ object SQLTable:
         yield prod.constructor(RowProduct(r, prod.elements))
       def insertAll(rs: Iterable[R]): Connection ?=> Int = 
         repeatedInsert(rs, prod.label, prod.elements)
+      def columns: Query = colNames(prod.elements)
+      def values(r: R): Query = colValues(r, prod.elements)
 
 trait SQLModel[R] extends SQLCore[R]:
   def selectBranch(label: String, clause: Query): Connection ?=> Generator[R]
