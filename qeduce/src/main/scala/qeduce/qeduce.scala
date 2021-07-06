@@ -41,12 +41,10 @@ trait Query extends SQLRepr:
   override def toString = parts.zip(params).map(_ + _).mkString + parts.last
 
   /**
-   * Prepare, execute and close a JDBC statement for this Query
-   * using a Connection.
-   * 
-   * Pass the executed statement to a fn. It may not be used outside this fn.
+   * Prepare and later close a JDBC statement for this Query,
+   * pending a Connection.
    */
-  def apply(): Connection ?=> Generator[PreparedStatement] =
+  def prepare(): Connection ?=> Generator[PreparedStatement] =
     new Generator[PreparedStatement]:
       def generate(effect: PreparedStatement => Generator.Action): Generator.Action =
         trace(query.toString)
@@ -89,18 +87,6 @@ object Query:
 
   val empty: Query = apply("")
 
-  def resultGenerator(st: PreparedStatement) =
-    new Generator[Row]:
-      def generate(f: Row => Generator.Action): Generator.Action =
-        var a: Generator.Action = Generator.Continue
-        val cursor = st.executeQuery()
-        try
-          while a == Generator.Continue && cursor.next() 
-          do a = f(Row(cursor))
-          a
-        finally
-          cursor.close
-   
 /**
  * The `sql` string interpolator.
  */
@@ -118,10 +104,10 @@ class CompoundQuery(val queries: ArraySeq[Query]) extends SQLRepr:
   def +(query: Query) = CompoundQuery(queries :+ query)
   def +(other: CompoundQuery) = CompoundQuery(queries ++ other.queries)
   
-  def apply(): Connection ?=> Generator[PreparedStatement] =
+  def prepare(): Connection ?=> Generator[PreparedStatement] =
     for 
       q <- Generator.from(queries)
-      s <- q()
+      s <- q.prepare()
     yield s
 
   override def toString = queries.mkString(";\n")
@@ -132,27 +118,42 @@ class CompoundQuery(val queries: ArraySeq[Query]) extends SQLRepr:
 trait SQLRepr:
 
   /**
-   * Generate JDBC statements, pending a connection.
+   * Prepare JDBC statements, pending a connection.
    */ 
-  def apply(): Connection ?=> Generator[PreparedStatement]
+  def prepare(): Connection ?=> Generator[PreparedStatement]
 
   /**
-   * Execute a the statements as an update or data definition and return the update count.
+   * Execute a the statements as an update or data definition,
+   * pending a connection, and return the update count.
    */
-  def update: Connection ?=> Int = 
-    var ig = 0
-    for st <- apply()
-    do ig += st.executeUpdate()
-    ig
+  def execute(): Connection ?=> Int = 
+    var n = 0
+    for st <- prepare()
+    do n += st.executeUpdate()
+    n
 
   /**
    * Execute the statments as queries and return a Generator of Rows
    */   
   def results: Connection ?=> Generator[Row] = 
     for 
-      st <- apply()
-      row <- Query.resultGenerator(st)
+      st <- prepare()
+      row <- SQLRepr.resultGenerator(st)
     yield row
+
+object SQLRepr:
+  def resultGenerator(st: PreparedStatement) =
+    new Generator[Row]:
+      def generate(f: Row => Generator.Action): Generator.Action =
+        var a: Generator.Action = Generator.Continue
+        val cursor = st.executeQuery()
+        try
+          while a == Generator.Continue && cursor.next() 
+          do a = f(Row(cursor))
+          a
+        finally
+          cursor.close
+       
 
 /**
  * Connect to a database and provide the connection as a given to a context fn.

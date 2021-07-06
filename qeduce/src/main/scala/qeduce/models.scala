@@ -33,9 +33,9 @@ object SQLTable:
     trace(s"deriving SQLTable[${prod.label}]")
     new SQLTable[R]:
       def insert(r: R): Connection ?=> Int = 
-        insertTemplate(r, prod.label, prod.elements).update
+        insertTemplate(r, prod.label, prod.elements).execute()
       def declare(): Connection ?=> Int = 
-        createTemplate(prod.label, prod.elements).update
+        createTemplate(prod.label, prod.elements).execute()
       def select(clause: Query): Connection ?=> Generator[R] = 
         for r <- selectTemplate(prod.label, prod.elements, clause).results
         yield prod.constructor(RowProduct(r, prod.elements))
@@ -53,12 +53,12 @@ object SQLModel:
     new SQLModel[R]:
       def insert(r: R): Connection ?=> Int = 
         val bv = sum.cast(r)
-        insertTemplate(bv.value, bv.branch.label, bv.branch.elements).update
+        insertTemplate(bv.value, bv.branch.label, bv.branch.elements).execute()
 
       def declare(): Connection ?=> Int = 
         var n = 0
         for b <- sum.branches
-        do n += createTemplate(b.label, b.elements).update
+        do n += createTemplate(b.label, b.elements).execute()
         n
 
       def selectBranch(label: String, clause: Query): Connection ?=> Generator[R] = 
@@ -113,7 +113,7 @@ package helpers:
     var n = 0
     if ! bs.isEmpty then
       val qy = insertTemplate(bs.head, label, elements)
-      for st <- qy()
+      for st <- qy.prepare()
       do 
         n += st.executeUpdate()
         for b <- bs.tail
