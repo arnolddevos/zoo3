@@ -102,6 +102,8 @@ object Query:
           case n => Seq("") ++ Seq.fill(n-1)(", ") ++ Seq("")
       val params = ps
 
+  val empty: Query = apply("")
+
   def resultGenerator(st: PreparedStatement) =
     new Generator[Row]:
       def generate(f: Row => Generator.Action): Generator.Action =

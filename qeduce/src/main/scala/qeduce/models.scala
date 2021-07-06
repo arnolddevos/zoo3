@@ -10,19 +10,21 @@ import java.sql.{PreparedStatement, Connection}
 import geny.Generator
 import helpers._
 
-def insert[R](r: R)(using t: SQLTable[R]): Connection ?=> Int = t.insert(r)
-def declare[R](using t: SQLTable[R]): Connection ?=> Int = t.declare()
-def selectBranch[R](label: String)(using t: SQLModel[R]): Connection ?=> Generator[R] = t.selectBranch(label)
-def select[R](using t: SQLTable[R]): Connection ?=> Generator[R] = t.select()
-def insertAll[R](rs: Iterable[R])(using t: SQLTable[R]): Connection ?=> Int = t.insertAll(rs)
+def declare[R](using t: SQLCore[R]): Connection ?=> Int = t.declare()
+def insert[R](r: R)(using t: SQLCore[R]): Connection ?=> Int = t.insert(r)
+def insertAll[R](rs: Iterable[R])(using t: SQLCore[R]): Connection ?=> Int = t.insertAll(rs)
+def select[R](using t: SQLCore[R]): Connection ?=> Generator[R] = t.select(Query.empty)
+def select[R](clause: Query)(using t: SQLCore[R]): Connection ?=> Generator[R] = t.select(clause)
+def selectBranch[R](label: String, clause: Query = Query.empty)(using t: SQLModel[R]): Connection ?=> Generator[R] = 
+  t.selectBranch(label, clause)
 
-trait SQLTable[R]:
+trait SQLCore[R]:
+  def declare(): Connection ?=> Int
   def insert(r: R): Connection ?=> Int
   def insertAll(rs: Iterable[R]): Connection ?=> Int
-  def declare(): Connection ?=> Int
-  def select(): Connection ?=> Generator[R]
+  def select(clause: Query): Connection ?=> Generator[R]
 
-import Helpers._
+trait SQLTable[R] extends SQLCore[R]
 
 object SQLTable:
   def derived[R](using prod: ProductType[R, SQLType]): SQLTable[R] =
@@ -32,14 +34,14 @@ object SQLTable:
         insertTemplate(r, prod.label, prod.elements).update
       def declare(): Connection ?=> Int = 
         createTemplate(prod.label, prod.elements).update
-      def select(): Connection ?=> Generator[R] = 
-        for r <- selectTemplate(prod.label, prod.elements).results
+      def select(clause: Query): Connection ?=> Generator[R] = 
+        for r <- selectTemplate(prod.label, prod.elements, clause).results
         yield prod.constructor(RowProduct(r, prod.elements))
       def insertAll(rs: Iterable[R]): Connection ?=> Int = 
         repeatedInsert(rs, prod.label, prod.elements)
 
-trait SQLModel[R] extends SQLTable[R]:
-  def selectBranch(label: String): Connection ?=> Generator[R]
+trait SQLModel[R] extends SQLCore[R]:
+  def selectBranch(label: String, clause: Query): Connection ?=> Generator[R]
 
 object SQLModel:
   def derived[R](using sum: SumType[R, SQLType]): SQLModel[R] =
@@ -55,15 +57,15 @@ object SQLModel:
         do n += createTemplate(b.label, b.elements).update
         n
 
-      def selectBranch(label: String): Connection ?=> Generator[R] = 
+      def selectBranch(label: String, clause: Query): Connection ?=> Generator[R] = 
         val b = sum.branches.find(_.label == label).get
-        val q = selectTemplate(label, b.elements)
+        val q = selectTemplate(label, b.elements, clause)
         q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
 
-      def select(): Connection ?=> Generator[R] =
+      def select(clause: Query): Connection ?=> Generator[R] =
         for
           b <- Generator.from(sum.branches)
-          q = selectTemplate(b.label, b.elements)
+          q = selectTemplate(b.label, b.elements, clause)
           r <- q.results
         yield
           b.upcast(b.constructor(RowProduct(r, b.elements)))
@@ -100,8 +102,8 @@ package helpers:
     sql"create table if not exists" ~ Query(label) ~ 
     sql"(" ~ colNames(elements) ~ sql")"
 
-  def selectTemplate[B](label: String, elements: IndexedSeq[Element[B, SQLType]]): Query =
-    sql"select" ~ colNames(elements) ~ sql"from" ~ Query(label)
+  def selectTemplate[B](label: String, elements: IndexedSeq[Element[B, SQLType]], clause: Query): Query =
+    sql"select" ~ colNames(elements) ~ sql"from" ~ Query(label) ~ clause
 
   def repeatedInsert[B](bs: Iterable[B], label: String, elements: IndexedSeq[Element[B, SQLType]]): Connection ?=> Int =
     var n = 0
@@ -118,8 +120,6 @@ package helpers:
     n
 
   class RowProduct[B](row: Row, elements: IndexedSeq[Element[B, SQLType]]) extends Product:
-    def productElement(ix: Int): Any = 
-  def productElement(ix: Int): Any = 
     def productElement(ix: Int): Any = 
       val e = elements(ix)
       row(e.label)(using e.typeclass)
