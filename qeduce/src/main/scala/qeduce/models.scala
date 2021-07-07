@@ -10,23 +10,22 @@ import java.sql.{PreparedStatement, Connection}
 import geny.Generator
 import helpers._
 
-def declare[R](using t: SQLCore[R]): Connection ?=> Int = t.declare()
-def insert[R](r: R)(using t: SQLCore[R]): Connection ?=> Int = t.insert(r)
-def insertAll[R](rs: Iterable[R])(using t: SQLCore[R]): Connection ?=> Int = t.insertAll(rs)
-def select[R](using t: SQLCore[R]): Connection ?=> Generator[R] = t.select(Query.empty)
-def select[R](clause: Query)(using t: SQLCore[R]): Connection ?=> Generator[R] = t.select(clause)
-def selectBranch[R](label: String, clause: Query = Query.empty)(using t: SQLModel[R]): Connection ?=> Generator[R] = 
-  t.selectBranch(label, clause)
+type SelectTemplate = (Query, Query) => Query
+val allRows: SelectTemplate = sql"select" ~ _ ~ sql"from" ~ _ 
 
-trait SQLCore[R]:
+def declare[R](using t: SQLTable[R]): Connection ?=> Int = t.declare()
+def insert[R](r: R)(using t: SQLTable[R]): Connection ?=> Int = t.insert(r)
+def insertAll[R](rs: Iterable[R])(using t: SQLTable[R]): Connection ?=> Int = t.insertAll(rs)
+def select[R](using t: SQLTable[R]): Connection ?=> Generator[R] = t.select(allRows)
+def select[R](template: SelectTemplate)(using t: SQLTable[R]): Connection ?=> Generator[R] = t.select(template)
+def selectBranch[R](label: String, template: SelectTemplate = allRows)(using t: SQLModel[R]): Connection ?=> Generator[R] = 
+  t.selectBranch(label, template)
+
+trait SQLTable[R]:
   def declare(): Connection ?=> Int
   def insert(r: R): Connection ?=> Int
   def insertAll(rs: Iterable[R]): Connection ?=> Int
-  def select(clause: Query): Connection ?=> Generator[R]
-
-trait SQLTable[R] extends SQLCore[R]:
-  def columns: Query
-  def values(r: R): Query
+  def select(template: SelectTemplate): Connection ?=> Generator[R]
 
 object SQLTable:
   def derived[R](using prod: ProductType[R, SQLType]): SQLTable[R] =
@@ -36,16 +35,14 @@ object SQLTable:
         insertTemplate(r, prod.label, prod.elements).execute()
       def declare(): Connection ?=> Int = 
         createTemplate(prod.label, prod.elements).execute()
-      def select(clause: Query): Connection ?=> Generator[R] = 
-        for r <- selectTemplate(prod.label, prod.elements, clause).results
+      def select(template: SelectTemplate): Connection ?=> Generator[R] = 
+        for r <- expandSelect(prod.label, prod.elements, template).results
         yield prod.constructor(RowProduct(r, prod.elements))
       def insertAll(rs: Iterable[R]): Connection ?=> Int = 
         repeatedInsert(rs, prod.label, prod.elements)
-      def columns: Query = colNames(prod.elements)
-      def values(r: R): Query = colValues(r, prod.elements)
 
-trait SQLModel[R] extends SQLCore[R]:
-  def selectBranch(label: String, clause: Query): Connection ?=> Generator[R]
+trait SQLModel[R] extends SQLTable[R]:
+  def selectBranch(label: String, template: SelectTemplate): Connection ?=> Generator[R]
 
 object SQLModel:
   def derived[R](using sum: SumType[R, SQLType]): SQLModel[R] =
@@ -61,15 +58,15 @@ object SQLModel:
         do n += createTemplate(b.label, b.elements).execute()
         n
 
-      def selectBranch(label: String, clause: Query): Connection ?=> Generator[R] = 
+      def selectBranch(label: String, template: SelectTemplate): Connection ?=> Generator[R] = 
         val b = sum.branches.find(_.label == label).get
-        val q = selectTemplate(label, b.elements, clause)
+        val q = expandSelect(label, b.elements, template)
         q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
 
-      def select(clause: Query): Connection ?=> Generator[R] =
+      def select(template: SelectTemplate): Connection ?=> Generator[R] =
         for
           b <- Generator.from(sum.branches)
-          q = selectTemplate(b.label, b.elements, clause)
+          q = expandSelect(b.label, b.elements, template)
           r <- q.results
         yield
           b.upcast(b.constructor(RowProduct(r, b.elements)))
@@ -106,8 +103,8 @@ package helpers:
     sql"create table if not exists" ~ Query(label) ~ 
     sql"(" ~ colNames(elements) ~ sql")"
 
-  def selectTemplate[B](label: String, elements: IndexedSeq[Element[B, SQLType]], clause: Query): Query =
-    sql"select" ~ colNames(elements) ~ sql"from" ~ Query(label) ~ clause
+  def expandSelect[B](label: String, elements: IndexedSeq[Element[B, SQLType]], template: SelectTemplate): Query =
+    template(colNames(elements), Query(label))
 
   def repeatedInsert[B](bs: Iterable[B], label: String, elements: IndexedSeq[Element[B, SQLType]]): Connection ?=> Int =
     var n = 0
