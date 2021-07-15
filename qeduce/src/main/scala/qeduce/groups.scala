@@ -114,24 +114,24 @@ def sqlTable[R](struct: Struct[R]): SQLTable[R] =
     case given SumType[R, SQLType] => SQLModel.derived
 
 def table[R](using struct: Struct[R]) = Stored(struct.label, struct)
+def table[R](name: Name)(using struct: Struct[R]) = Stored(name, struct)
 def buffer[R] = Resident(ArrayBuffer())
 
 extension[R](head: Var[R])
   def :=(body: Expr[R]) = Imply(head, body)
+  def apply() = RefNode(head) 
 
 extension[R](expr: Expr[R])
   def project[S](using struct: Struct[S], witness: IsProjection[R, S]) =
     Projection(expr, witness, struct)
-  def groupBy[S](f: R => S) =
-    Mapping(expr, f)
+  def groupBy[S](f: R => S) = Mapping(expr, f)
+  def distinct = DistinctNode(expr)
 
 extension[R, S](group: Group[R, S])
   def count[T](f: (S, Int) => T) = CountNode(group, f)
   def apply[T](f: (S, Connection ?=> Generator[R]) => T) = AggregateNode(group, (s, v) => f(s, release(v)))
+  def distinct = ProjectNode(group)
 
-def select[R](subject: Var[R]) = RefNode(subject)
-def select[X, R](group: Group[X, R]) = ProjectNode(group)
-def select[R](generator: Connection ?=> Generator[R]) = ValueNode(suspend(generator))
-def select[R](values: Iterable[R]) = ValueNode(suspend(Generator.from(values)))
-def select[R](using struct: Struct[R])(query: Query) = ValueNode(QueryValue(query, struct))
-def distinct[R](expr: Expr[R]) = DistinctNode(expr)
+def lift[R](generator: Connection ?=> Generator[R]) = ValueNode(suspend(generator))
+def lift[R](values: Iterable[R]) = ValueNode(suspend(Generator.from(values)))
+def lift[R](using struct: Struct[R])(query: Query) = ValueNode(QueryValue(query, struct))
