@@ -16,7 +16,7 @@ enum Var[R]:
   case Resident(buffer: ArrayBuffer[R])
 
 enum Value[R]:
-  case QueryValue(query: Query, struct: Struct[R])
+  case QueryValue(query: SelectTemplate, struct: Struct[R])
   case GeneratorValue(generator: Connection => Generator[R])
 
 enum Expr[R]:
@@ -44,7 +44,7 @@ def suspend[R](effect: Connection ?=> Generator[R]): Value[R] =
 def release[R](value: Value[R]): Connection ?=> Generator[R] =
   value match
     case GeneratorValue(generator) => generator(summon[Connection])
-    case QueryValue(query, struct) => sqlTable(struct).select((_, _) => query)
+    case QueryValue(query, struct) => sqlTable(struct).select(query)
 
 def interpret[R](e: Expr[R]): Value[R] =
   e match
@@ -128,4 +128,4 @@ extension[R](expr: Expr[R])
 
 def lift[R](generator: Connection ?=> Generator[R]) = ValueNode(suspend(generator))
 def lift[R](values: Iterable[R]) = ValueNode(suspend(Generator.from(values)))
-def lift[R](using struct: Struct[R])(query: Query) = ValueNode(QueryValue(query, struct))
+def lift[R](using struct: Struct[R])(query: SelectTemplate) = ValueNode(QueryValue(query, struct))
