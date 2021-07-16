@@ -11,11 +11,6 @@ import scala.collection.immutable.ArraySeq
 type Name = String
 type Struct[R] = SumOrProductType[R, SQLType]
 
-trait IsProjection[R, S]:
-  def apply(r: R): S
-
-object IsProjection
-
 enum Var[R]:
   case Stored(struct: Struct[R])
   case Resident(buffer: ArrayBuffer[R])
@@ -27,21 +22,21 @@ enum Value[R]:
 enum Expr[R]:
   case RefNode(subject: Var[R])
   case ValueNode(value: Value[R])
-  case AggregateNode[R, S, T](group: Group[R, S], aggregate: (S, Value[R]) => T) extends Expr[T]
-  case CountNode[R, S, T](group: Group[R, S], aggregate: (S, Int) => T) extends Expr[T]
-  case ProjectNode[R, S](group: Group[R, S]) extends Expr[S]
+  case AggregateNode[R, S, T](expr: Expr[R], group: Grouping[R, S], aggregate: (S, Value[R]) => T) extends Expr[T]
+  case CountNode[R, S, T](expr: Expr[R], group: Grouping[R, S], aggregate: (S, Int) => T) extends Expr[T]
+  case ProjectNode[R, S](expr: Expr[R], group: Grouping[R, S]) extends Expr[S]
   case DistinctNode(expr: Expr[R])
-
-enum Group[R, S]:
-  case Projection(expr: Expr[R], witness: IsProjection[R, S], struct: Struct[S])
-  case Mapping(expr: Expr[R], map: R => S)
 
 enum Rule:
   case Imply[R](head: Var[R], body: Expr[R])
 
 case class Program( rules: ArraySeq[Rule])
 
-import Var._, Value._, Expr._, Group._, Rule._
+enum Grouping[R, S]:
+  case Projection(map: R => S, alt: SelectTemplate, struct: Struct[S])
+  case Mapping(map: R => S)
+
+import Var._, Value._, Expr._, Grouping._, Rule._
 
 def suspend[R](effect: Connection ?=> Generator[R]): Value[R] =
   GeneratorValue(connection => effect(using connection))
@@ -61,19 +56,19 @@ def interpret[R](e: Expr[R]): Value[R] =
       )
     case RefNode(Resident(buffer)) => suspend(Generator.from(buffer))
     case ValueNode(value) => value
-    case AggregateNode(group, aggregate) => 
+    case AggregateNode(expr, group, aggregate) => 
       suspend(
-        for (s, g) <- release(interpret(group) )
+        for (s, g) <- release(interpret(expr, group) )
         yield aggregate(s, g)
       )
-    case CountNode(group, aggregate) => 
+    case CountNode(expr, group, aggregate) => 
       suspend(
-        for (s, g) <- release(interpret(group))
+        for (s, g) <- release(interpret(expr, group))
         yield aggregate(s, release(g).foldLeft(0)((n, _) => n+1))
       )
-    case ProjectNode(group) =>
+    case ProjectNode(expr, group) =>
       suspend(
-        for (s, _) <- release(interpret(group))
+        for (s, _) <- release(interpret(expr, group))
         yield s
       )
     case DistinctNode(expr) => 
@@ -81,16 +76,16 @@ def interpret[R](e: Expr[R]): Value[R] =
         Generator.from(release(interpret(expr)).toBuffer.distinct)
       )
 
-def interpret[R, S](g: Group[R, S]): Value[(S, Value[R])] =
+def interpret[R, S](expr: Expr[R], g: Grouping[R, S]): Value[(S, Value[R])] =
   g match
-    case Projection(expr, project, struct) => 
+    case Projection(map, alt, struct) => 
       suspend {
-        val a = release(interpret(expr)).toBuffer.groupBy(project(_))
+        val a = release(interpret(expr)).toBuffer.groupBy(map(_))
         val b = a.map((s, rs) => (s, suspend(Generator.from(rs))))
         Generator.from(b.toBuffer)
       }
 
-    case Mapping(expr, map) => 
+    case Mapping(map) => 
       suspend {
         val a = release(interpret(expr)).toBuffer.groupBy(map)
         val b = a.map((s, rs) => (s, suspend(Generator.from(rs))))
@@ -121,15 +116,15 @@ extension[R](head: Var[R])
   def apply() = RefNode(head) 
 
 extension[R](expr: Expr[R])
-  def project[S](using struct: Struct[S], witness: IsProjection[R, S]) =
-    Projection(expr, witness, struct)
-  def groupBy[S](f: R => S) = Mapping(expr, f)
-  def distinct = DistinctNode(expr)
-
-extension[R, S](group: Group[R, S])
-  def count[T](f: (S, Int) => T) = CountNode(group, f)
-  def apply[T](f: (S, Connection ?=> Generator[R]) => T) = AggregateNode(group, (s, v) => f(s, release(v)))
-  def distinct = ProjectNode(group)
+  def groupBy[S, T](f: R => S)(g: (S, Connection ?=> Generator[R]) => T): Expr[T] = 
+    groupBy(Mapping(f))(g)
+  def groupBy[S, T](f: Grouping[R, S])(g: (S, Connection ?=> Generator[R]) => T): Expr[T] = 
+    AggregateNode(expr, f, (s, v) => g(s, release(v)))
+  def count[S, T](f: R => S)(g: (S, Int) => T): Expr[T] = count(Mapping(f))(g)
+  def count[S, T](f: Grouping[R, S])(g: (S, Int) => T): Expr[T] = CountNode(expr, f, g)
+  def project[S](f: R => S): Expr[S] = project(Mapping(f))
+  def project[S](f: Grouping[R, S]): Expr[S] = ProjectNode(expr, f)
+  def distinct: Expr[R] = DistinctNode(expr)
 
 def lift[R](generator: Connection ?=> Generator[R]) = ValueNode(suspend(generator))
 def lift[R](values: Iterable[R]) = ValueNode(suspend(Generator.from(values)))
