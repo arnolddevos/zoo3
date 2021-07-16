@@ -17,7 +17,7 @@ trait IsProjection[R, S]:
 object IsProjection
 
 enum Var[R]:
-  case Stored(table: Name, struct: Struct[R])
+  case Stored(struct: Struct[R])
   case Resident(buffer: ArrayBuffer[R])
 
 enum Value[R]:
@@ -53,10 +53,10 @@ def release[R](value: Value[R]): Connection ?=> Generator[R] =
 
 def interpret[R](e: Expr[R]): Value[R] =
   e match
-    case RefNode(Stored(table, struct)) => 
+    case RefNode(Stored(struct)) => 
       suspend(
         sqlTable(struct).select(
-          (cols, _) => allRows(cols, Query(table))
+          (cols, _) => allRows(cols, Query(struct.label))
         )
       )
     case RefNode(Resident(buffer)) => suspend(Generator.from(buffer))
@@ -101,7 +101,7 @@ def interpret(p: Program): Connection ?=> Unit =
   for r <- p.rules
   do
     r match
-      case Imply(Stored(table, struct), expr) => 
+      case Imply(Stored(struct), expr) => 
         for r <- release(interpret(expr))
         do sqlTable(struct).insert(r)
       case Imply(Resident(buffer), expr) => 
@@ -113,8 +113,7 @@ def sqlTable[R](struct: Struct[R]): SQLTable[R] =
     case given ProductType[R, SQLType] => SQLTable.derived
     case given SumType[R, SQLType] => SQLModel.derived
 
-def table[R](using struct: Struct[R]) = Stored(struct.label, struct)
-def table[R](name: Name)(using struct: Struct[R]) = Stored(name, struct)
+def table[R](using struct: Struct[R]) = Stored(struct)
 def buffer[R] = Resident(ArrayBuffer())
 
 extension[R](head: Var[R])
