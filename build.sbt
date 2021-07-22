@@ -1,6 +1,6 @@
 
 def SV = "3.0.0"
-def V  = "0.7.1"
+def V  = "0.8.0"
 def O  = "com.backgroundsignal"
 
 lazy val root = 
