@@ -1,8 +1,8 @@
 package qeduce
 package helpers
 
-import summit.{SumType, ProductType, SumOrProductType, Branch, BranchValue, Element, trace}
-import java.sql.{PreparedStatement, Connection}
+import summit.Element
+import java.sql.Connection
 import geny.Generator
 
 type SelectTemplate = (Query, Query) => Query

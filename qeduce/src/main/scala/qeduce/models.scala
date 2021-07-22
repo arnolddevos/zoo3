@@ -15,6 +15,12 @@ export qeduce.helpers.{SelectTemplate, allRows}
 type SQLTable[R] = ProductType[R, SQLType]
 type SQLModel[R] = SumType[R, SQLType]
 
+def tableName[R](using prod: SQLTable[R]) = Query(prod.label)
+
+def attribNames[R](using prod: SQLTable[R]): Query = colNames(prod.elements)
+
+def attribValues[R](r: R)(using prod: SQLTable[R]): Query = colValues(r, prod.elements)
+
 def declare[R](using prod: SQLTable[R]): Connection ?=> Int = 
   createTemplate(prod.label, prod.elements).execute()
 
@@ -66,5 +72,5 @@ def selectBranch[R](label: String, template: SelectTemplate = allRows)(using sum
   q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
 
 extension(rs: Connection ?=> Generator[Row])
-  def as[P](using t: ProductType[P, SQLType]): Connection ?=> Generator[P] = 
+  def as[R](using t: SQLTable[R]): Connection ?=> Generator[R] = 
     rs.map(r => t.constructor(RowProduct(r, t.elements)))
