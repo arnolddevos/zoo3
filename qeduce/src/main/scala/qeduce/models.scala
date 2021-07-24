@@ -13,13 +13,13 @@ import scala.CanEqual.derived
 
 export qeduce.helpers.{SelectTemplate, allRows}
 
-trait SQLCapable[R]
-sealed case class SQLTable[R](prod: ProductType[R, SQLType]) extends SQLCapable[R]
-sealed case class SQLModel[R](sum: SumType[R, SQLType]) extends SQLCapable[R]
+type SQLCapable[R] = SQLTable[R]|SQLModel[R]
 
+case class SQLTable[R](prod: ProductType[R, SQLType])
 object SQLTable:
   def derived[R](using prod: ProductType[R, SQLType]): SQLTable[R] = SQLTable(prod)
 
+case class SQLModel[R](sum: SumType[R, SQLType])
 object SQLModel:
   def derived[R](using sum: SumType[R, SQLType]): SQLModel[R] = SQLModel(sum)
 
