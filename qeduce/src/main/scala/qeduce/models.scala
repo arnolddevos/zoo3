@@ -5,7 +5,7 @@ package qeduce
  */ 
 package models
 
-import summit.{SumType, ProductType}
+import summit.{SumType, ProductType, Element}
 import java.sql.Connection
 import geny.Generator
 import qeduce.helpers._
@@ -14,6 +14,7 @@ import scala.CanEqual.derived
 export qeduce.helpers.{SelectTemplate, allRows}
 
 type SQLCapable[R] = SQLTable[R]|SQLModel[R]
+type SQLNest[R] = SQLTable[R]|SQLType[R]
 
 case class SQLTable[R](prod: ProductType[R, SQLType])
 object SQLTable:
@@ -23,9 +24,46 @@ case class SQLModel[R](sum: SumType[R, SQLType])
 object SQLModel:
   def derived[R](using sum: SumType[R, SQLType]): SQLModel[R] = SQLModel(sum)
 
+case class SQLJoint[R](prod: ProductType[R, SQLNest])
+object SQLJoint:
+  def derived[R](using prod: ProductType[R, SQLNest]): SQLJoint[R] = SQLJoint(prod)
+  given[R <: Tuple](using prod: ProductType[R, SQLNest]): SQLJoint[R] = SQLJoint(prod)
+
 def tableName[R](using t: SQLTable[R]) = Query(t.prod.label)
 
 def attribNames[R](using t: SQLTable[R]): Query = colNames(t.prod.elements)
+
+def construct[R](using t: SQLTable[R])(r: Row): R =
+  t.prod.constructor(RowProduct(r, t.prod.elements, None))
+
+def constructQualified[R](using t: SQLTable[R])(r: Row, prefix: String): R =
+  t.prod.constructor(RowProduct(r, t.prod.elements, Some(prefix)))
+
+def qualifiedNames[R](using t: SQLJoint[R]): Query = 
+  val ls =
+    for 
+      e <- t.prod.elements
+      l <- e.typeclass match
+        case SQLTable(nest) => 
+          for d <- nest.elements
+          yield s"${e.label}.${d.label}"
+        case d: SQLType[e.A] => Seq(e.label)
+    yield l
+
+  Query(ls.mkString(", "))
+
+def jointConstruct[R](using t: SQLJoint[R])(r: Row): R =
+  t.prod.constructor(JointProduct(r, t.prod.elements))
+
+class JointProduct[B](row: Row, elements: IndexedSeq[Element[B, SQLNest]]) extends Product:
+  def productElement(ix: Int): Any = 
+    val e = elements(ix)
+    e.typeclass match
+      case given SQLTable[e.A] => constructQualified(row, e.label)
+      case given SQLType[e.A] => row(e.label)
+    
+  def productArity: Int = elements.size
+  def canEqual(other: Any) = false
 
 def attribValues[R](r: R)(using t: SQLTable[R]): Query = colValues(r, t.prod.elements)
 
@@ -62,22 +100,22 @@ def select[R](using c: SQLCapable[R]): Connection ?=> Generator[R] = select(allR
 
 def select[R](template: SelectTemplate)(using c: SQLCapable[R]): Connection ?=> Generator[R] =
   c match
-    case SQLTable(prod) =>
-      for r <- expandSelect(prod.label, prod.elements, template).results
-      yield prod.constructor(RowProduct(r, prod.elements))
+    case given SQLTable[R] =>
+      for r <- template(attribNames, tableName).results
+      yield construct(r)
     case SQLModel(sum) =>
       for
         b <- Generator.from(sum.branches)
         q = expandSelect(b.label, b.elements, template)
         r <- q.results
       yield
-        b.upcast(b.constructor(RowProduct(r, b.elements)))
+        b.upcast(b.constructor(RowProduct(r, b.elements, None)))
 
 def selectBranch[R](label: String, template: SelectTemplate = allRows)(using t: SQLModel[R]): Connection ?=> Generator[R] = 
   val b = t.sum.branches.find(_.label == label).get
   val q = expandSelect(label, b.elements, template)
-  q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements))))
+  q.results.map(r => b.upcast(b.constructor(RowProduct(r, b.elements, None))))
 
 extension(rs: Connection ?=> Generator[Row])
-  def as[R](using t: SQLTable[R]): Connection ?=> Generator[R] = 
-    rs.map(r => t.prod.constructor(RowProduct(r, t.prod.elements)))
+  def as[R](using SQLTable[R]): Connection ?=> Generator[R] = 
+    rs.map(construct)

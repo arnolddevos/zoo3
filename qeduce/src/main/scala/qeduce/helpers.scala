@@ -46,9 +46,10 @@ def repeatedInsert[B](bs: Iterable[B], label: String, elements: IndexedSeq[Eleme
         n += st.executeUpdate()
   n
 
-class RowProduct[B](row: Row, elements: IndexedSeq[Element[B, SQLType]]) extends Product:
+class RowProduct[B](row: Row, elements: IndexedSeq[Element[B, SQLType]], prefix: Option[String]) extends Product:
   def productElement(ix: Int): Any = 
     val e = elements(ix)
-    row(e.label)(using e.typeclass)
+    val name = prefix.fold(e.label)(qual => s"${qual}.${e.label}")
+    row(name)(using e.typeclass)
   def productArity: Int = elements.size
   def canEqual(other: Any) = false
