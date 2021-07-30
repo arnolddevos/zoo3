@@ -7,6 +7,7 @@ import scala.util.control.NonFatal
 import scala.collection.immutable.ArraySeq
 import summit.trace
 import geny.Generator
+ import scala.annotation.targetName
  
 /**
  * A Query can be constructed by the sql string interpolator and 
@@ -33,8 +34,18 @@ trait Query extends SQLRepr:
   def ~[A](a: A)(using t: SQLType[A]): Query =
     this ~ Query(Param(a))
 
-  def ~[A](term: SQLTerm[A]): Query =
-    this ~ Query(term.name)
+  def ~(term: Term[?]): Query =
+    this ~ Query(term)
+
+  @targetName("appendTerms")
+  def ~(terms: Seq[Term[?]]): Query =
+    this ~ Query(terms)
+
+  def ~(param: Param): Query =
+    this ~ Query(param)
+
+  def ~(params: Seq[Param]): Query =
+    this ~ Query(params)
 
   def +(other: Query) = CompoundQuery(ArraySeq(this, other))
     
@@ -84,6 +95,13 @@ object Query:
           case 1 => Seq("", "")
           case n => Seq("") ++ Seq.fill(n-1)(", ") ++ Seq("")
       val params = ps
+
+  def apply(term: Term[?]): Query =
+    apply(term.name)
+
+  @targetName("fromTerms")
+  def apply(terms: Seq[Term[?]]): Query =
+    apply(terms.map(_.name).mkString(", "))
 
   val empty: Query = apply("")
 
@@ -210,9 +228,9 @@ object Param:
     def apply(a: A) = Param(a)
 
 /**
- * An SQLTerm is an SQL identifier and corresponding type.   
+ * An Term is an SQL identifier and corresponding type.   
  */ 
-final class SQLTerm[A](val name: String)
+final class Term[A](val name: String)
 
 /**
  * A Row is a restricted view of a ResultSet.
@@ -231,11 +249,11 @@ object Row:
      */
     def apply[A](name: String)(using t: SQLType[A]): A = t.extract(r, name)
     /**
-     * Extract a value of designated by a typed SQLTerm or throw SQLException.
+     * Extract a value of designated by a typed Term or throw SQLException.
      */
-    def apply[A](term: SQLTerm[A])(using t: SQLType[A]): A = t.extract(r, term.name)
+    def apply[A](term: Term[A])(using t: SQLType[A]): A = t.extract(r, term.name)
     /**
      * Extract a value from a Row by term as a Try.
      */
-    def get[A](term: SQLTerm[A])(using t: SQLType[A]): Try[A] = Try(t.extract(r, term.name))
+    def get[A](term: Term[A])(using t: SQLType[A]): Try[A] = Try(t.extract(r, term.name))
 
