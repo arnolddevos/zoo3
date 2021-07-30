@@ -7,7 +7,7 @@ import scala.collection.immutable.ArraySeq
 import java.sql.Connection
 import geny.Generator
 
-type Struct[R] = SQLCapable[R]
+type Struct[R] = Insertable[R]
 class Key[R]
 type Residence = [R] => Key[R] => ArrayBuffer[R]
 

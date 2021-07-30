@@ -3,53 +3,43 @@ package helpers
 
 import summit.Element
 import java.sql.Connection
-import geny.Generator
 
-type SelectTemplate = (Query, Query) => Query
-val allRows: SelectTemplate = sql"select" ~ _ ~ sql"from" ~ _ 
+type SelectTemplate = (Query, Seq[Term[?]]) => Query
 
-def colNames[B](elements: IndexedSeq[Element[B, SQLType]]): Query =
-  val ls =
-    for e <- elements
-    yield e.label
-  Query(ls.mkString(", "))
+def selectTemplate(source: Query, attribs: Seq[Term[?]]) = 
+  sql"select" ~ attribs ~ sql"from" ~ source 
 
-def colValues[B](b: B, elements: IndexedSeq[Element[B, SQLType]]): Query =
-  val ps =
-    for e <- elements
-    yield Param(e.pick(b))(using e.typeclass)
-  Query(ps)
+def declareTemplate(name: Query, attribs: Seq[Term[?]]) = 
+  sql"create table if not exists" ~ name ~ sql"(" ~ attribs ~ sql")"
 
-def insertTemplate[B](b: B, label: String, elements: IndexedSeq[Element[B, SQLType]]): Query =
-  sql"insert into" ~ Query(label) ~ 
-  sql"("  ~ colNames(elements) ~ 
-  sql") values (" ~ colValues(b, elements) ~ sql")"
+def insertTemplate(name: Query, attribs: Seq[Term[?]], values: Seq[Param]) = 
+  sql"insert into" ~ name ~ sql"("  ~ attribs ~ sql") values (" ~ values ~ sql")"
 
-def createTemplate[B](label: String, elements: IndexedSeq[Element[B, SQLType]]): Query =
-  sql"create table if not exists" ~ Query(label) ~ 
-  sql"(" ~ colNames(elements) ~ sql")"
+def colName[B](e: Element[B, SQLType]) = Term[e.A](e.label)
 
-def expandSelect[B](label: String, elements: IndexedSeq[Element[B, SQLType]], template: SelectTemplate): Query =
-  template(colNames(elements), Query(label))
+def colNames[B](elements: IndexedSeq[Element[B, SQLType]]): Seq[Term[?]] =
+  for e <- elements yield colName(e)
 
-def repeatedInsert[B](bs: Iterable[B], label: String, elements: IndexedSeq[Element[B, SQLType]]): Connection ?=> Int =
+def colValues[R](r: R, elements: IndexedSeq[Element[R, SQLType]]): Seq[Param] =
+  for e <- elements yield Param(e.pick(r))(using e.typeclass)
+
+def repeatedInsert[R](rs: Iterable[R], label: String, elements: IndexedSeq[Element[R, SQLType]]): Connection ?=> Int =
   var n = 0
-  if ! bs.isEmpty then
-    val qy = insertTemplate(bs.head, label, elements)
+  if ! rs.isEmpty then
+    val qy = insertTemplate(Query(label), colNames(elements), colValues(rs.head, elements))
     for st <- qy.prepare()
     do 
       n += st.executeUpdate()
-      for b <- bs.tail
+      for b <- rs.tail
       do
         for e <- elements
         do e.typeclass.inject(st, e.index+1, e.pick(b))
         n += st.executeUpdate()
   n
 
-class RowProduct[B](row: Row, elements: IndexedSeq[Element[B, SQLType]], prefix: Option[String]) extends Product:
+class TableRow[R](row: Row, elements: IndexedSeq[Element[R, SQLType]]) extends Product:
   def productElement(ix: Int): Any = 
     val e = elements(ix)
-    val name = prefix.fold(e.label)(qual => s"${qual}.${e.label}")
-    row(name)(using e.typeclass)
+    row(colName(e))(using e.typeclass)
   def productArity: Int = elements.size
   def canEqual(other: Any) = false

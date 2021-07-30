@@ -12,7 +12,7 @@ import Var._, Value._, Expr._, Grouping._, Rule._
 
 def interpret[R](e: Expr[R]): Value[R] =
   e match
-    case RefNode(Stored(struct)) => QueryValue(allRows, struct)
+    case RefNode(Stored(struct)) => QueryValue(selectTemplate, struct)
     case RefNode(Resident(buffer)) => suspend(Generator.from(buffer(summon[Residence])))
     case ValueNode(value) => value
     case AggregateNode(expr, group, aggregate) => 
@@ -40,7 +40,7 @@ def interpretProject[R, S](expr: Expr[R], group: Grouping[R, S]): Value[S] =
     case QueryValue(query, inner: SQLTable[R]) =>
       group match
         case Projection(map, alt, outer: SQLTable[S]) => 
-          QueryValue((cs, n) => query(cs, tableName(using inner)) ~ sql"group by" ~ cs, outer)
+          QueryValue((_, cs) => query(tableName(using inner), cs) ~ sql"group by" ~ cs, outer)
         case _ => fallback
     case _ => fallback
 
@@ -57,7 +57,7 @@ def interpretCount[R, S, T](expr: Expr[R], group: Grouping[R, S], aggregate: (S,
     case QueryValue(query, inner: SQLTable[R]) =>
       group match
         case Projection(map, alt, outer: SQLTable[S]) => 
-          QueryValue((cs, n) => query(cs ~ sql", count(*) as group_count", tableName(using inner)) ~ sql"group by" ~ cs, ???)
+          QueryValue((_, cs) => sql"select" ~ cs ~ sql", count(*) as group_count" ~ sql"from"  ~ tableName(using inner) ~ sql"group by" ~ cs, ???)
         case _ => fallback
     case _ => fallback
   
@@ -91,7 +91,7 @@ def interpret[R](v: Var[R], e: Expr[R]): Residence ?=> Connection ?=> Unit =
       interpret(e) match
         case QueryValue(query, rhs: SQLTable[R]) => 
           sql"insert into" ~ tableName(using lhs) ~ sql"(" ~ attribNames(using lhs) ~ sql")" ~ 
-          query(attribNames(using rhs), tableName(using rhs))
+          query(tableName(using rhs), attribNames(using rhs))
         case rs =>
           for r <- release(rs) do insert(r)(using lhs)
 
