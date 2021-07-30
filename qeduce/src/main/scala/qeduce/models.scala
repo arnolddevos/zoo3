@@ -8,9 +8,9 @@ package models
 import summit.{SumType, ProductType, Branch, BranchValue, Element}
 import java.sql.Connection
 import geny.Generator
-import qeduce.helpers._
+import helpers._
 
-export qeduce.helpers.{SelectTemplate, selectTemplate}
+export helpers.{SelectTemplate, selectTemplate}
 
 case class SQLTable[R](prod: ProductType[R, SQLType])
 

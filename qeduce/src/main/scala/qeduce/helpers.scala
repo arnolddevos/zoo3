@@ -1,4 +1,5 @@
 package qeduce
+package models
 package helpers
 
 import summit.Element
