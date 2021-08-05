@@ -59,6 +59,12 @@ def insert[R](r: R)(using c: Insertable[R]): Connection ?=> Int =
       val b = bv.branch
       insertTemplate(tableName(b), attribNames(b), attribValues(bv)).execute()
 
+def insertAll[R](rs: Generator[R])(using c: Insertable[R]): Connection ?=> Int = 
+  var n = 0
+  for c <- chunked(rs, 2000)
+  do n += insertAll(c)
+  n
+
 def insertAll[R](rs: Iterable[R])(using c: Insertable[R]): Connection ?=> Int = 
   c match
     case SQLTable(prod) => repeatedInsert(rs, prod.label, prod.elements)
