@@ -41,7 +41,7 @@ trait Simple extends Signature { this: Fibers with Synchronization =>
 
     def bracket[E1 >: E, B](release: A => IO[Nothing, Any])(use: A => IO[E1, B]): IO[E1, B] =
       for {
-        a <- this
+        a <- this // TODO: run the resource creation in a fiber and mask this whole bracket operation
         b <- use(a).ensuring(release(a))
       }
       yield b

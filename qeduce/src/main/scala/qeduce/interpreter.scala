@@ -2,7 +2,8 @@ package qeduce
 package groups
 package interpreter
 
-import qeduce.models._
+import qeduce.models.{tableName, Insertable, SQLTable, SQLModel, selectTemplate, select, insert, insertAll}
+import qeduce.models.joins.attribNames
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.immutable.ArraySeq
 import java.sql.Connection
@@ -12,71 +13,29 @@ import Var._, Value._, Expr._, Grouping._, Rule._
 
 def interpret[R](e: Expr[R]): Value[R] =
   e match
-    case RefNode(Stored(struct)) => QueryValue(selectTemplate, struct)
+    case RefNode(Stored(struct: SQLTable[R])) => QueryValue(selectTemplate(tableName(using struct), _), struct)
+    case RefNode(Stored(struct: SQLModel[R])) => suspend(select(using struct))
     case RefNode(Resident(buffer)) => suspend(Generator.from(buffer(summon[Residence])))
     case ValueNode(value) => value
-    case AggregateNode(expr, group, aggregate) => 
-      suspend(
-        for (s, g) <- release(interpret(interpret(expr), group))
-        yield aggregate(s, g)
-      )
-    case CountNode(expr, group, aggregate) => interpretCount(expr, group, aggregate)
-    case ProjectNode(expr, group) => interpretProject(expr, group)
-    case DistinctNode(expr) => 
-      suspend(
-        Generator.from(release(interpret(expr)).toBuffer.distinct)
-      )
-
-def interpretProject[R, S](expr: Expr[R], group: Grouping[R, S]): Value[S] = 
-  val v = interpret(expr) 
-
-  def fallback =
-    suspend(
-      for (s, _) <- release(interpret(v, group))
-      yield s
-    )
-
-  v match
-    case QueryValue(query, inner: SQLTable[R]) =>
-      group match
-        case Projection(map, alt, outer: SQLTable[S]) => 
-          QueryValue((_, cs) => query(tableName(using inner), cs) ~ sql"group by" ~ cs, outer)
-        case _ => fallback
-    case _ => fallback
-
-def interpretCount[R, S, T](expr: Expr[R], group: Grouping[R, S], aggregate: (S, Int) => T): Value[T] = 
-  val v = interpret(expr)
-
-  def fallback =
-    suspend(
-      for (s, g) <- release(interpret(v, group))
-      yield aggregate(s, release(g).foldLeft(0)((n, _) => n+1))
-    )
-
-  v match
-    case QueryValue(query, inner: SQLTable[R]) =>
-      group match
-        case Projection(map, alt, outer: SQLTable[S]) => 
-          QueryValue((_, cs) => sql"select" ~ cs ~ sql", count(*) as group_count" ~ sql"from"  ~ tableName(using inner) ~ sql"group by" ~ cs, ???)
-        case _ => fallback
-    case _ => fallback
-  
-
+    case UnaryNode(expr, trans) => ???
+    case BinaryNode(lhs, rhs, join) => ???
+    case SelectNode(expr, query, struct) => ???
+    case JoinNode(lhs, rhs, query, struct) => ???
+    case AggregateNode(expr, group, aggregate) => ???
+    case CountNode(expr, group) => ???
+    case ProjectNode(expr, group) =>  ???
+    case DistinctNode(expr) => ???
 
 def interpret[R, S](v: Value[R], g: Grouping[R, S]): Value[(S, Value[R])] =
   g match
-    case Projection(map, alt, struct) => 
-      suspend {
-        val a = release(v).toBuffer.groupBy(map(_))
-        val b = a.map((s, rs) => (s, suspend(Generator.from(rs))))
-        Generator.from(b.toBuffer)
-      }
+    case Projection(struct) => ???
 
     case Mapping(map) => 
       suspend {
         val a = release(v).toBuffer.groupBy(map)
         val b = a.map((s, rs) => (s, suspend(Generator.from(rs))))
-        Generator.from(b.toBuffer)
+        val c = b.toBuffer
+        Generator.from(c)
       }
 
 def interpret(p: Program): Residence ?=> Connection ?=> Unit =
@@ -85,19 +44,20 @@ def interpret(p: Program): Residence ?=> Connection ?=> Unit =
     r match
       case Imply(r, e) => interpret(r, e)
 
-def interpret[R](v: Var[R], e: Expr[R]): Residence ?=> Connection ?=> Unit =
-  v match
-    case Stored(lhs: SQLTable[R]) => 
-      interpret(e) match
-        case QueryValue(query, rhs: SQLTable[R]) => 
-          sql"insert into" ~ tableName(using lhs) ~ sql"(" ~ attribNames(using lhs) ~ sql")" ~ 
-          query(tableName(using rhs), attribNames(using rhs))
+def interpret[R](lhs: Var[R], rhs: Expr[R]): Residence ?=> Connection ?=> Unit =
+  lhs match
+    case Stored(struct1: SQLTable[R]) => 
+      interpret(rhs) match
+        case QueryValue(query, struct2) => 
+          sql"insert into" ~ tableName(using struct1) ~ sql"(" ~ attribNames(using struct1) ~ sql")" ~ 
+          query(attribNames(using struct2))
         case rs =>
-          for r <- release(rs) do insert(r)(using lhs)
+          insertAll(release(rs))(using struct1)
 
-    case Stored(lhs) =>
-      for r <- release(interpret(e)) do insert(r)(using lhs)
+    case Stored(struct1) =>
+      insertAll(release(interpret(rhs)))(using struct1)
 
     case Resident(buffer) => 
-      for r <- release(interpret(e))
-      do buffer(summon[Residence]) += r
+      val b = buffer(summon[Residence])
+      for r <- release(interpret(rhs))
+      do  b += r
